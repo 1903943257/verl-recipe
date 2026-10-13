@@ -1,5 +1,6 @@
 set -x
 
+MODEL_PATH=${MODEL_PATH:-$HOME/experiments/char_count/models/sft/megatron/global_step_140/huggingface}
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -10,7 +11,7 @@ python3 -m verl.trainer.main_ppo \
     data.max_response_length=128 \
     data.filter_overlong_prompts=False \
     data.truncation='error' \
-    actor_rollout_ref.model.path=$HOME/experiments/char_count/models/sft/megatron/global_step_140/huggingface \
+    actor_rollout_ref.model.path=$MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
@@ -40,6 +41,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
     trainer.total_epochs=5 \
-    trainer.use_legacy_worker_impl=disable \
-    custom_reward_function.path=./reward_function.py \
-    custom_reward_function.name=char_count_reward_function
+    reward.custom_reward_function.path=./reward_function.py \
+    reward.custom_reward_function.name=char_count_reward_function \
+    "$@"

@@ -70,6 +70,9 @@ fi
 CKPT_HOME=${CKPT_HOME:-$HOME/open_verl/sft/${project_name}/${exp_name}}
 mkdir -p "${CKPT_HOME}"
 
+# ignore_input_ids_mismatch: the Qwen3 chat template reformats the <think> block in the
+# answers, so tokenizing turn by turn and tokenizing the whole conversation disagree.
+# verl uses the turn-by-turn tokens, as it did before this check was added.
 torchrun --standalone --nnodes=1 --nproc-per-node=${NUM_TRAINERS:-8} \
     ${ENTRYPOINT} \
     data.train_files="${TRAIN_FILES}" \
@@ -80,6 +83,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=${NUM_TRAINERS:-8} \
     data.use_dynamic_bsz=True \
     data.max_token_len_per_gpu=65536 \
     data.messages_key=messages \
+    data.ignore_input_ids_mismatch=True \
     model.path=$MODEL_ID \
     model.use_remove_padding=${USE_REMOVE_PADDING} \
     ${ENGINE_CONFIG} \
@@ -92,4 +96,5 @@ torchrun --standalone --nnodes=1 --nproc-per-node=${NUM_TRAINERS:-8} \
     trainer.default_local_dir="${CKPT_HOME}" \
     trainer.resume_mode=${RESUME_MODE} \
     trainer.max_ckpt_to_keep=5 \
-    checkpoint.save_contents=[model,optimizer,extra]
+    checkpoint.save_contents=[model,optimizer,extra] \
+    "$@"

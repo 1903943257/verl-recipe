@@ -30,7 +30,7 @@ Note that
 Installation
 
 ```bash
-pip install verl==0.6.1
+pip install "verl[verl-core]==0.9.1"
 ```
 
 
@@ -59,6 +59,7 @@ python3 -m verl.model_merger merge --backend megatron --local_dir $CKPT_PATH --t
 
 To run GRPO
 ```bash
-bash train_grpo.sh
+bash train_grpo.sh  # starts from the megatron SFT checkpoint
+MODEL_PATH=$HOME/experiments/char_count/models/sft/fsdp/global_step_140/huggingface bash train_grpo.sh  # fsdp SFT checkpoint
 ```
 We train GRPO for 2 epochs. After 2 epochs, the validation score is around 0.6.

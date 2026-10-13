@@ -57,7 +57,7 @@ Each recipe `README.md` links to its `REQUIRED_VERL.txt` in a short **Required `
 ./install_verl.sh --recipe spin   --option baseline       # SPIN v0.3.0.post1
 ```
 
-Flags: `--recipe NAME` (e.g. `gkd/megatron`, `specRL/histoSpec`) or `--file PATH/TO/REQUIRED_VERL.txt`, `--method pip|git` (default `pip`), `--dest DIR` (default `./verl`, only used with `--method git`), `--show` (dry-run), `--yes` (skip confirmation), `--list`, `--help`.
+Flags: `--recipe NAME` (e.g. `gkd/megatron`, `specRL/histoSpec`) or `--file PATH/TO/REQUIRED_VERL.txt`, `--method pip|git` (default `pip`), `--hardware-plugin NAME` (use for devices that require [verl-hardware-plugin](https://github.com/verl-project/verl-hardware-plugin); add the device's packages under its name in `install_verl.sh`, and `<NAME>_PLUGIN_COMMIT` to the `REQUIRED_VERL.txt` of each recipe tested on it), `--dest DIR` (default `./verl`, only used with `--method git`), `--show` (dry-run), `--yes` (skip confirmation), `--list`, `--help`.
 
 The script requires only `bash`, `git`, `awk`, and `pip`/`pip3` on `PATH`. It does **not** `source` or `eval` the `REQUIRED_VERL.txt` file — values are extracted with `awk` and the exact command to be executed is echoed before it runs.
 

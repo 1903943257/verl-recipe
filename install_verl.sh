@@ -24,6 +24,11 @@
 #                        MODE=rolling_with_baseline -> rolling | baseline (default: rolling)
 #                        MODE=dapo reproduction    -> rolling | reproduction (default: rolling)
 #                      Ignored for other MODEs.
+#   --hardware-plugin NAME
+#                      Install for hardware that verl supports through verl-hardware-plugin,
+#                      e.g. intel. Needs <NAME>_PLUGIN_COMMIT in the recipe's REQUIRED_VERL.txt.
+#                      Installs NAME's stack (hardware_stack below), verl, the plugin at that
+#                      commit, then NAME's packages that must override verl's own pins.
 #   --dest DIR         Directory to clone verl into when --method git is used
 #                      (default: ./verl).
 #   --show             Print the resolved plan and exit without running anything.
@@ -44,9 +49,36 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
+HARDWARE_PLUGIN_UPSTREAM="https://github.com/verl-project/verl-hardware-plugin.git"
+HW_PLUGIN=""  # set by --hardware-plugin
+STACK_INDEXES="" STACK_BEFORE="" STACK_AFTER=""  # set by hardware_stack
+
+# hardware_stack NAME -> sets what --hardware-plugin NAME installs around verl:
+#   STACK_INDEXES  package sources for the hardware's own builds, besides PyPI
+#   STACK_BEFORE   installed before verl: the hardware's torch / vLLM builds, so verl's
+#                  dependencies find them instead of pulling PyPI's
+#   STACK_AFTER    installed after verl and the plugin: packages that must override verl's
+#                  declared ranges
+hardware_stack() {
+    STACK_INDEXES="" STACK_BEFORE="" STACK_AFTER=""
+    case "$1" in
+        intel)
+            STACK_INDEXES="https://download.pytorch.org/whl/xpu https://wheels.vllm.ai/xpu https://wheels.vllm.ai/0.29.0/xpu"
+            STACK_BEFORE="torch==2.13.0+xpu torchvision==0.28.0+xpu torchaudio==2.11.0+xpu torchcodec==0.17.0+cpu vllm==0.29.0+xpu"
+            # transformers >= 5.17 with kernels provides flash_attention_2 on Intel GPUs (verl
+            # 0.9.1 declares transformers<5.11); Ray counts Intel GPUs through dpctl.
+            STACK_AFTER="transformers==5.17.0 kernels==0.16.2 dpctl==0.22.1"
+            ;;
+        # Example for another vendor, added by that vendor once its recipes are tested:
+        # tpu)
+        #     STACK_INDEXES="<package sources>" STACK_BEFORE="<torch / vLLM builds>" STACK_AFTER="<overrides>"
+        #     ;;
+    esac
+}
+
 print_help() {
-    # Print the banner comment (lines 2..41), stripping the leading `# ` / `#`.
-    sed -n '2,41p' "${BASH_SOURCE[0]}" | sed -E 's/^#( |$)//'
+    # Print the banner comment (lines 2..46), stripping the leading `# ` / `#`.
+    sed -n '2,46p' "${BASH_SOURCE[0]}" | sed -E 's/^#( |$)//'
 }
 
 log()  { printf '[install_verl] %s\n' "$*" >&2; }
@@ -250,12 +282,35 @@ install_via_pip() {
     fi
     pip_bin="$(detect_pip)"
     rewritten="$(rewrite_pip_cmd "$R_PIP_INSTALL" "$pip_bin")"
+    install_stack_before "$pip_bin"
     run_cmd "$rewritten"
+    install_plugin_and_after "$pip_bin"
+}
+
+# --hardware-plugin only: the hardware's own builds (STACK_BEFORE), before verl.
+install_stack_before() {
+    local pip_bin="$1" idx args=""
+    [[ -n "$HW_PLUGIN" && -n "$STACK_BEFORE" ]] || return 0
+    for idx in $STACK_INDEXES; do args+=" --extra-index-url $idx"; done
+    run_cmd "$pip_bin install${args} $STACK_BEFORE"
+}
+
+# --hardware-plugin only, after verl: the plugin, then STACK_AFTER. The plugin comes first
+# since installing it re-applies verl's declared ranges, which STACK_AFTER overrides.
+install_plugin_and_after() {
+    local pip_bin="$1"
+    [[ -n "$HW_PLUGIN" ]] || return 0
+    run_cmd "$pip_bin install \"verl-hardware-plugin @ git+${HARDWARE_PLUGIN_UPSTREAM}@${R_PLUGIN_COMMIT}\""
+    if [[ -n "$STACK_AFTER" ]]; then
+        log "note: pip may report that verl requires other versions of these; that is expected"
+        run_cmd "$pip_bin install $STACK_AFTER"
+    fi
 }
 
 install_via_git() {
     local dest="$1" pip_bin
     pip_bin="$(detect_pip)"
+    install_stack_before "$pip_bin"
 
     # If the recipe recorded a self-contained GIT_SETUP line, run that verbatim
     # (it already does clone + checkout + submodule init + cd, which is the
@@ -267,6 +322,7 @@ install_via_git() {
         else
             run_cmd "$R_GIT_SETUP"
             run_cmd "cd verl && $pip_bin install -e ."
+            install_plugin_and_after "$pip_bin"
             return
         fi
     fi
@@ -283,6 +339,7 @@ install_via_git() {
     # Bring the recipe submodule to the matching revision so relative imports work.
     run_cmd "cd '$dest' && git submodule update --init --recursive recipe || true"
     run_cmd "cd '$dest' && $pip_bin install -e ."
+    install_plugin_and_after "$pip_bin"
 }
 
 main() {
@@ -293,6 +350,7 @@ main() {
             --file)   file="${2:?}";   shift 2 ;;
             --method) method="${2:?}"; shift 2 ;;
             --option) option="${2:?}"; shift 2 ;;
+            --hardware-plugin) HW_PLUGIN="${2:?}"; shift 2 ;;
             --dest)   dest="${2:?}";   shift 2 ;;
             --show)   show=1; shift ;;
             --yes|-y) ASSUME_YES=1; shift ;;
@@ -316,11 +374,23 @@ main() {
     local R_MODE R_UPSTREAM R_COMMIT R_TAG R_PIP_INSTALL R_GIT_SETUP R_LABEL
     resolve_spec "$file" "$option"
 
+    # A recipe tested with --hardware-plugin NAME pins the plugin as <NAME>_PLUGIN_COMMIT.
+    local R_PLUGIN_COMMIT=""
+    if [[ -n "$HW_PLUGIN" ]]; then
+        [[ "$HW_PLUGIN" =~ ^[a-z][a-z0-9_]*$ ]] || die "--hardware-plugin expects a name like intel (got '$HW_PLUGIN')"
+        R_PLUGIN_COMMIT="$(get_field "$file" "${HW_PLUGIN^^}_PLUGIN_COMMIT")"
+        if [[ -z "$R_PLUGIN_COMMIT" ]]; then
+            die "$(printf '%s has no %s_PLUGIN_COMMIT: this recipe has not been tested with --hardware-plugin %s yet' "$file" "${HW_PLUGIN^^}" "$HW_PLUGIN")"
+        fi
+        hardware_stack "$HW_PLUGIN"
+    fi
+
     cat >&2 <<EOF
 [install_verl] file:     $file
 [install_verl] MODE:     $R_MODE
 [install_verl] upstream: $R_UPSTREAM
 [install_verl] resolved: $R_LABEL
+[install_verl] hardware plugin: ${HW_PLUGIN:-none}
 [install_verl] method:   $method
 [install_verl] pip line: ${R_PIP_INSTALL:-<none>}
 EOF

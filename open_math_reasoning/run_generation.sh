@@ -27,6 +27,4 @@ python3 -m verl.trainer.main_generation_server \
     data.train_files="$train_files" \
     data.prompt_key=prompt \
     +data.output_path="${OUTPUT_PATH}" \
-
-
-
+    "$@"

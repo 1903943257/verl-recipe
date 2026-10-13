@@ -1,6 +1,9 @@
 # char_count — tested PyPI / tag release
 UPSTREAM=https://github.com/verl-project/verl.git
 MODE=pinned_tag
-TAG=v0.6.1
-COMMIT=d62da4950573d7a4b7ef2362337952e7ab59e78d
-PIP_INSTALL=pip install verl==0.6.1
+TAG=v0.9.1
+COMMIT=1876b06d0a3e4e71e06230be10af14492ca8a75b
+PIP_INSTALL=pip install "verl[verl-core]==0.9.1"
+# Intel GPUs (install_verl.sh --hardware-plugin intel): verl-hardware-plugin commit this
+# recipe was tested with; Intel's packages are listed in install_verl.sh
+INTEL_PLUGIN_COMMIT=6ca30cd3fe474fceaa5e84a6693f29a4dcc760b1
