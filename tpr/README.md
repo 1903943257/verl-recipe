@@ -156,6 +156,7 @@ To smoke-test the native Full path, use the same external inputs and topology, b
 | `git apply --check` fails | Upstream VERL SHA mismatch, pre-existing edits or patch already applied; start from a clean pinned checkout |
 | `wrong verl_tpr import` / import error | Editable install and `PYTHONPATH` point to a different runtime; ensure Recipe and VERL directories are visible inside Docker |
 | Hydra rejects `tpr_enabled` | Ensure the VERL patch is applied to the checkout loaded by Python and the launcher adds the Recipe-only key with `+actor_rollout_ref.actor.megatron.tpr_enabled=...`. CP>1 selects Ring automatically; no separate CP backend setting exists. |
+| TransferQueue `total_storage_size / num_data_storage_units` TypeError | The launcher sets `transfer_queue.backend.SimpleStorage.total_storage_size=100000`; if running a custom command, provide a numeric capacity when TransferQueue is enabled. |
 | Model or task path validation error | `MODEL_PATH`, `TRAIN_FILE`, `TASK_CONFIG` or `UNIAGENT_ROOT` missing/not mounted inside the container |
 | No examples after prompt filtering | `MAX_PROMPT_LENGTH` too small for the prepared Parquet; inspect actual input lengths |
 | Ring / MindSpeed import or kernel error | Ascend container dependencies/topology not compatible; inspect the first stack trace, not just the last Ray error |
