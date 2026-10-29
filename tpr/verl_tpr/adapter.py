@@ -405,9 +405,7 @@ def run_tpr_forward_backward_batch(
         nonlocal tree_number
         setup_start = time.perf_counter() if detailed_profile else None
         shard_for_segment = (
-            None
-            if cp_runtime.ring is None
-            else lambda segment: cp_runtime.ring.make_sequence_shard(segment.length)
+            None if cp_runtime.ring is None else lambda segment: cp_runtime.ring.make_sequence_shard(segment.length)
         )
         callback, counts = objective.bind_tree(tree_plan, shard_for_segment=shard_for_segment)
         executor = SegmentExecutor(

@@ -366,6 +366,7 @@ class TPREngineCPRuntime:
     def enabled(self) -> bool:
         return self.size > 1
 
+
 def resolve_engine_cp_runtime(engine: Any) -> TPREngineCPRuntime:
     configured_size = engine.engine_config.context_parallel_size
     if not isinstance(configured_size, int) or isinstance(configured_size, bool) or configured_size <= 0:
