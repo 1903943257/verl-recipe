@@ -82,6 +82,7 @@ docker run -dit --name tpr_recipe_8npu \
   -v "$HOST_WORK:/workspace" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro \
+  -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi:ro \
   "$TPR_IMAGE" sleep infinity
 docker exec -it tpr_recipe_8npu bash
 ~~~
@@ -89,6 +90,10 @@ docker exec -it tpr_recipe_8npu bash
 SECURITY: privileged mode and the host Docker socket grant extensive host
 access. Use this only on a trusted, dedicated host. For shared production
 hosts replace them with approved device mappings and sandbox isolation.
+
+The example assumes the host provides /usr/local/bin/npu-smi; adjust that
+mount if your distribution installs the binary elsewhere. Additional
+Ascend firmware/device mounts may be required by your driver version.
 
 The host Docker daemon also runs **task sandboxes**. If the training
 container lacks the docker CLI, install the CLI only, not another daemon.
