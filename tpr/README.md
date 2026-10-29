@@ -155,7 +155,7 @@ To smoke-test the native Full path, use the same external inputs and topology, b
 | --- | --- |
 | `git apply --check` fails | Upstream VERL SHA mismatch, pre-existing edits or patch already applied; start from a clean pinned checkout |
 | `wrong verl_tpr import` / import error | Editable install and `PYTHONPATH` point to a different runtime; ensure Recipe and VERL directories are visible inside Docker |
-| Hydra `tpr_enabled`/`tpr_cp_backend` unknown | The patch was not applied to the VERL checkout Python is loading |
+| Hydra `Could not override ... tpr_enabled` | The pinned YAML uses strict keys; ensure the launcher uses `+actor_rollout_ref.actor.megatron.tpr_enabled=...` and `+actor_rollout_ref.actor.megatron.tpr_cp_backend=...` to add the Recipe-only fields. The Python dataclass patch alone does not add fields to the YAML schema. |
 | Model or task path validation error | `MODEL_PATH`, `TRAIN_FILE`, `TASK_CONFIG` or `UNIAGENT_ROOT` missing/not mounted inside the container |
 | No examples after prompt filtering | `MAX_PROMPT_LENGTH` too small for the prepared Parquet; inspect actual input lengths |
 | Ring / MindSpeed import or kernel error | Ascend container dependencies/topology not compatible; inspect the first stack trace, not just the last Ray error |
