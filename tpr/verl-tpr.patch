@@ -1,7 +1,7 @@
 diff --git a/verl/workers/config/engine.py b/verl/workers/config/engine.py
 --- a/verl/workers/config/engine.py
 +++ b/verl/workers/config/engine.py
-@@ -206,7 +206,10 @@ class McoreEngineConfig(EngineConfig):
+@@ -206,7 +206,9 @@ class McoreEngineConfig(EngineConfig):
      override_ddp_config: dict[str, Any] = field(default_factory=dict)
      override_transformer_config: dict[str, Any] = field(default_factory=dict)
      override_mcore_model_config: dict[str, Any] = field(default_factory=dict)
