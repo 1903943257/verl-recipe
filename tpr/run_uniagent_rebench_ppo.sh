@@ -206,8 +206,8 @@ python -m verl.trainer.main_ppo \
   ++actor_rollout_ref.actor.megatron.override_transformer_config.sequence_parallel="${TRAIN_SP}" \
   actor_rollout_ref.actor.megatron.use_remove_padding=True \
   "${RECOMPUTE_ARGS[@]}" \
-  actor_rollout_ref.actor.megatron.tpr_enabled="${TPR_ENABLED}" \
-  actor_rollout_ref.actor.megatron.tpr_cp_backend="${TPR_CP_BACKEND}" \
+  +actor_rollout_ref.actor.megatron.tpr_enabled="${TPR_ENABLED}" \
+  +actor_rollout_ref.actor.megatron.tpr_cp_backend="${TPR_CP_BACKEND}" \
   algorithm.rollout_correction.bypass_mode=True \
   algorithm.rollout_correction.loss_type=ppo_clip \
   actor_rollout_ref.rollout.n="${N}" \
