@@ -4,7 +4,7 @@ TPR is a training-side prefix-reuse runtime for VERL's Megatron engine. This rec
 
 ## Status
 
-The runtime was migrated to `verl_tpr/` and its package import was checked in the existing Ascend container. The integration patch and launcher in this draft still require `git apply --check`, config validation, and an end-to-end NPU run before this recipe is ready for public submission.
+Ruff lint/format, Python compilation and clean pinned VERL Patch application have been checked during the current manual acceptance run. Container imports, Hydra composition and a complete NPU PPO step remain pending.
 
 ## Contents
 
@@ -13,6 +13,10 @@ The runtime was migrated to `verl_tpr/` and its package import was checked in th
 - `run_uniagent_rebench_ppo.sh`: one PPO example using UniAgent and SWE-ReBench.
 - `REQUIRED_VERL.txt`: pinned VERL revision for the patch.
 - `pyproject.toml`: standalone Python package metadata.
+
+## Fresh-server installation
+
+Start with [INSTALL_ASCEND.md](INSTALL_ASCEND.md) for host Docker/image setup, the container environment, the local `un-iagent` directory (remote `verl-project/uni-agent`), Qwen model download, public SWE-reBench preparation and one-step acceptance. The shorter steps below assume those dependencies are already available.
 
 ## Architecture
 
@@ -30,7 +34,7 @@ You also need:
 
 - A local Qwen3 model directory containing `config.json` and its checkpoints.
 - A prepared SWE-ReBench task Parquet with a `prompt` column and data compatible with UniAgent.
-- A UniAgent checkout containing `uni_agent/framework/entry.py`, its task configuration YAML and any required task/reward containers or credentials.
+- A Uni-Agent checkout (locally named `un-iagent`) containing `uni_agent/framework/entry.py`, its task YAML and required task/reward containers or credentials.
 - A dedicated allocation of **8 Ascend NPUs** for the example defaults. The launcher does not stop other Ray jobs or manage devices.
 - The **Recipe checkout, patched VERL checkout, UniAgent checkout, model and data visible in the same running environment**. If using Docker, make sure all host paths are mounted and use their container paths below.
 
@@ -100,7 +104,7 @@ Set all five required paths to real files inside the container; placeholders bel
 
 ```bash
 export VERL_ROOT=/absolute/path/to/patched/verl-tpr-recipe-smoke
-export UNIAGENT_ROOT=/absolute/path/to/uni-agent
+export UNIAGENT_ROOT=/workspace/src/un-iagent
 export MODEL_PATH=/absolute/path/to/Qwen3-4B-128K
 export TRAIN_FILE=/absolute/path/to/prepared-swe-rebench-task.parquet
 export TASK_CONFIG=/absolute/path/to/swe-rebench-task-config.yaml
@@ -159,7 +163,7 @@ To smoke-test the native Full path, use the same external inputs and topology, b
 
 ## Validation status
 
-Ruff lint, Ruff formatting and Python compile checks have passed for the isolated PR #165 fix branch. **Clean upstream patch application, Hydra composition and NPU E2E are not yet certified** and must be completed before updating this status. The instructions above are the intended first-run acceptance procedure; they are not evidence that the example has already succeeded.
+Ruff lint/format, Python compilation and clean pinned VERL Patch application have passed in the current manual acceptance run. **Container imports, Hydra composition and NPU E2E are not yet certified**. See [INSTALL_ASCEND.md](INSTALL_ASCEND.md) for the full installation path. The instructions above are the intended first-run acceptance procedure; they are not evidence that the example has already succeeded.
 
 ## Scope
 
