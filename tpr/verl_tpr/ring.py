@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public TPR Ring CP API and Engine backend; see ring_layout/ring_attention.
+"""Public TPR Ring CP execution primitives; see ring_layout/ring_attention.
 
 The public and diagnostic import names remain available here. For profiling or
 monkeypatching, instrument the *owning* implementation module.
@@ -302,8 +302,6 @@ def _prefix_blocks_by_layer(
 
 # Production CP policy: only the Prefix-aware Ring implementation is admitted.
 class RingCPBackend:
-    backend_name = "ring"
-
     def __init__(self, group: Any, *, parallel_size: int | None = None, parallel_rank: int | None = None):
         if (parallel_size is None) != (parallel_rank is None):
             raise ValueError("parallel_size and parallel_rank must be provided together")
@@ -368,22 +366,12 @@ class TPREngineCPRuntime:
     def enabled(self) -> bool:
         return self.size > 1
 
-    @property
-    def backend_name(self) -> str:
-        return "none" if self.backend is None else self.backend.backend_name
-
-
-def resolve_engine_cp_runtime(engine: Any, model_config: Any) -> TPREngineCPRuntime:
+def resolve_engine_cp_runtime(engine: Any) -> TPREngineCPRuntime:
     configured_size = engine.engine_config.context_parallel_size
     if not isinstance(configured_size, int) or isinstance(configured_size, bool) or configured_size <= 0:
         raise ValueError(f"context_parallel_size must be positive, got {configured_size!r}")
-    backend_name = getattr(engine.engine_config, "tpr_cp_backend", None)
     if configured_size == 1:
-        if backend_name not in (None, "auto"):
-            raise ValueError(f"tpr_cp_backend={backend_name!r} requires CP>1")
         return TPREngineCPRuntime(group=None, backend=None, size=1, rank=0)
-    if backend_name not in (None, "auto", "ring", "megatron_cp_algo"):
-        raise NotImplementedError("Production TPR only supports Ring CP")
     if getattr(engine.engine_config, "dynamic_context_parallel", False):
         raise NotImplementedError("Dynamic CP is not supported by TPR")
     from megatron.core import parallel_state

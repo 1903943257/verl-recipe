@@ -187,7 +187,7 @@ from uni_agent.framework.entry import AgentFrameworkRolloutAdapter
 from verl_tpr.adapter import run_tpr_forward_backward_batch
 for package in (verl, uni_agent, verl_tpr):
     print(package.__name__, Path(package.__file__).resolve())
-assert {"tpr_enabled", "tpr_cp_backend"} <= {x.name for x in fields(McoreEngineConfig)}
+assert {"tpr_enabled"} <= {x.name for x in fields(McoreEngineConfig)}
 print("PASS: patched VERL and TPR imports")
 PY
 ~~~

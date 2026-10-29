@@ -82,9 +82,6 @@ TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-$TOTAL_TRAINING_STEPS}"
 TPR_TREE_POLICY="${TPR_TREE_POLICY:-qwen_turn}"
 TPR_TURN_MIN_SEGMENT_TOKENS="${TPR_TURN_MIN_SEGMENT_TOKENS:-128}"
-if [[ -z "${TPR_CP_BACKEND:-}" ]]; then
-  if (( TRAIN_CP > 1 )); then TPR_CP_BACKEND=ring; else TPR_CP_BACKEND=auto; fi
-fi
 MODEL_NAME="${MODEL_NAME:-Qwen3-4B}"
 TEMPERATURE="${TEMPERATURE:-0.6}"
 TOP_P="${TOP_P:-0.95}"
@@ -125,7 +122,7 @@ echo "UNIAGENT_ROOT=${UNIAGENT_ROOT}"
 echo "MODEL_PATH=${MODEL_PATH}"
 echo "TRAIN_FILE=${TRAIN_FILE}"
 echo "TASK_CONFIG=${TASK_CONFIG}"
-echo "TPR_ENABLED=${TPR_ENABLED} TPR_CP_BACKEND=${TPR_CP_BACKEND}"
+echo "TPR_ENABLED=${TPR_ENABLED}"
 echo "Topology: NNODES=${NNODES} N_GPUS_PER_NODE=${N_GPUS_PER_NODE} TP=${TRAIN_TP} CP=${TRAIN_CP} DP=${TRAIN_DP} SP=${TRAIN_SP}"
 echo "Sequence: prompt=${MAX_PROMPT_LENGTH} response=${MAX_RESPONSE_LENGTH} max_model_len=${MAX_MODEL_LEN}"
 echo "RUN_ROOT=${RUN_ROOT}"
@@ -207,7 +204,6 @@ python -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.megatron.use_remove_padding=True \
   "${RECOMPUTE_ARGS[@]}" \
   +actor_rollout_ref.actor.megatron.tpr_enabled="${TPR_ENABLED}" \
-  +actor_rollout_ref.actor.megatron.tpr_cp_backend="${TPR_CP_BACKEND}" \
   algorithm.rollout_correction.bypass_mode=True \
   algorithm.rollout_correction.loss_type=ppo_clip \
   actor_rollout_ref.rollout.n="${N}" \

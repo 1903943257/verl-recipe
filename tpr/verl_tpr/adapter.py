@@ -190,11 +190,9 @@ def _validate_tpr_parallel_sizes(sizes: dict[str, int], *, ppo: bool) -> int:
     return tp
 
 
-def _validate_tpr_cp_combination(tp_size: int, cp_runtime: Any, config: Any, *, ppo: bool) -> None:
+def _validate_tpr_cp_combination(tp_size: int, cp_runtime: Any, config: Any) -> None:
     if cp_runtime.size <= 1:
         return
-    if (ppo or tp_size > 1) and cp_runtime.backend_name != "ring":
-        raise NotImplementedError(f"TPR TP+CP PPO requires the tested Ring backend; got {cp_runtime.backend_name!r}")
     if tp_size > 1 and getattr(config, "sequence_parallel", False):
         raise NotImplementedError("TP2+CP requires sequence_parallel=False; combined TP+SP+CP has not been validated")
 
@@ -359,8 +357,8 @@ def run_tpr_forward_backward_batch(
     if tp_size * sizes["CP"] > 1:
         assert_tp_plan_agreement(digest_forest_plan(forest), tp_size=tp_size, cp_size=sizes["CP"])
     record_stage("tp_plan_collective_ms", tp_check_start)
-    cp_runtime = resolve_engine_cp_runtime(engine, config)
-    _validate_tpr_cp_combination(tp_size, cp_runtime, config, ppo=True)
+    cp_runtime = resolve_engine_cp_runtime(engine)
+    _validate_tpr_cp_combination(tp_size, cp_runtime, config)
     # Reject unsupported physical shapes for the whole forest before any
     # forward/backward can leave the mini-batch with partial gradients.
     for tree_plan in forest.trees:
