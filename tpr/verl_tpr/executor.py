@@ -250,7 +250,7 @@ class SegmentExecutor:
         kv_stack: KVStack | None = None,
         loss_scale_func: Callable[[Tensor], Tensor] | None = None,
         cp_group: Any | None = None,
-        cp_backend: RingCPBackend | str | None = None,
+        ring_runtime: RingCPBackend | None = None,
         segment_loss_fn: Callable[[SegmentSpec, Tensor], tuple[Tensor, dict[str, Any]]] | None = None,
         segment_loss_term_counts: Mapping[SegmentId, int] | None = None,
         active_segment_ids: frozenset[SegmentId] | None = None,
@@ -308,29 +308,29 @@ class SegmentExecutor:
                 no_grad=True,
             )
         if cp_group is None:
-            if cp_backend is not None:
-                raise ValueError("cp_backend requires a cp_group")
+            if ring_runtime is not None:
+                raise ValueError("ring_runtime requires a cp_group")
             self.cp_size, self.cp_rank = 1, 0
-            self.cp_backend = None
+            self.ring_runtime = None
         else:
             self.cp_size, self.cp_rank = resolve_cp_group(cp_group)
             if self.cp_size <= 1:
                 raise ValueError(f"cp_group must contain more than one rank, got {self.cp_size}")
-            if isinstance(cp_backend, RingCPBackend):
-                if (cp_backend.parallel_size, cp_backend.parallel_rank) != (self.cp_size, self.cp_rank):
+            if ring_runtime is not None:
+                if not isinstance(ring_runtime, RingCPBackend):
+                    raise TypeError("ring_runtime must be a RingCPBackend")
+                if (ring_runtime.parallel_size, ring_runtime.parallel_rank) != (self.cp_size, self.cp_rank):
                     raise ValueError("RingCPBackend coordinates do not match initialized CP group")
-                self.cp_backend = cp_backend
-            elif cp_backend in (None, "ring", "megatron_cp_algo"):
-                self.cp_backend = RingCPBackend(
+                self.ring_runtime = ring_runtime
+            else:
+                self.ring_runtime = RingCPBackend(
                     cp_group,
                     parallel_size=self.cp_size,
                     parallel_rank=self.cp_rank,
                 )
-            else:
-                raise NotImplementedError("Production TPR only supports Ring CP")
             for segment in plan.segments.values():
                 try:
-                    self.cp_backend.validate_segment_length(segment.length)
+                    self.ring_runtime.validate_segment_length(segment.length)
                 except ValueError as exc:
                     raise ValueError(f"segment {segment.segment_id} {exc}") from exc
         validate_replay_plan(plan, prepared_model, cp_size=self.cp_size, active_segment_ids=active_segment_ids)
@@ -617,9 +617,9 @@ class SegmentExecutor:
             position_ids = position_ids.expand(len(leaf_group), -1)
         attention_backend = None
         if self.cp_enabled:
-            if self.cp_backend is None:
-                raise RuntimeError("CP execution is missing its backend")
-            attention_backend = self.cp_backend.make_attention_backend(
+            if self.ring_runtime is None:
+                raise RuntimeError("Ring CP execution is missing its runtime")
+            attention_backend = self.ring_runtime.make_attention_backend(
                 self.kv_stack,
                 expected_layer_numbers=self.expected_layer_numbers,
                 current_shard=shard,
@@ -699,9 +699,9 @@ class SegmentExecutor:
     def _segment_shard(self, segment: SegmentSpec) -> SequenceShard:
         if not self.cp_enabled:
             return SequenceShard.full(segment.length)
-        if self.cp_backend is None:
+        if self.ring_runtime is None:
             raise RuntimeError("CP execution is missing its backend")
-        return self.cp_backend.make_sequence_shard(segment.length)
+        return self.ring_runtime.make_sequence_shard(segment.length)
 
     def _ensure_healthy(self) -> None:
         if self._failed:

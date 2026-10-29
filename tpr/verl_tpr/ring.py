@@ -358,7 +358,7 @@ class RingCPBackend:
 @dataclass(frozen=True, slots=True)
 class TPREngineCPRuntime:
     group: Any | None
-    backend: RingCPBackend | None
+    ring: RingCPBackend | None
     size: int
     rank: int
 
@@ -371,7 +371,7 @@ def resolve_engine_cp_runtime(engine: Any) -> TPREngineCPRuntime:
     if not isinstance(configured_size, int) or isinstance(configured_size, bool) or configured_size <= 0:
         raise ValueError(f"context_parallel_size must be positive, got {configured_size!r}")
     if configured_size == 1:
-        return TPREngineCPRuntime(group=None, backend=None, size=1, rank=0)
+        return TPREngineCPRuntime(group=None, ring=None, size=1, rank=0)
     if getattr(engine.engine_config, "dynamic_context_parallel", False):
         raise NotImplementedError("Dynamic CP is not supported by TPR")
     from megatron.core import parallel_state
@@ -384,7 +384,7 @@ def resolve_engine_cp_runtime(engine: Any) -> TPREngineCPRuntime:
         raise RuntimeError(f"TPR CP topology mismatch: configured {configured_size}, actual {size}")
     return TPREngineCPRuntime(
         group=group,
-        backend=RingCPBackend(group, parallel_size=size, parallel_rank=rank),
+        ring=RingCPBackend(group, parallel_size=size, parallel_rank=rank),
         size=size,
         rank=rank,
     )
