@@ -19,7 +19,6 @@ from typing import Any
 import torch
 from torch import Tensor
 
-
 SegmentId = int
 QWEN3_IM_END_TOKEN_ID = 151645
 
@@ -47,8 +46,12 @@ class SegmentSpec:
             raise ValueError("prefix_length must equal position_start")
         if not isinstance(self.token_ids, Tensor):
             raise TypeError("token_ids must be a torch.Tensor")
-        if (self.token_ids.device.type != "cpu" or self.token_ids.dtype != torch.long
-                or self.token_ids.ndim != 1 or not self.token_ids.numel()):
+        if (
+            self.token_ids.device.type != "cpu"
+            or self.token_ids.dtype != torch.long
+            or self.token_ids.ndim != 1
+            or not self.token_ids.numel()
+        ):
             raise ValueError("token_ids must be a non-empty one-dimensional CPU torch.long tensor")
         if bool((self.token_ids < 0).any()):
             raise ValueError("token_ids must be non-negative")
@@ -154,6 +157,7 @@ class TreeExecutionPlan:
     def logical_loss_tokens(self) -> int:
         return len(self.objective_refs)
 
+
 @dataclass(frozen=True, slots=True)
 class ForestExecutionPlan:
     trees: tuple[TreeExecutionPlan, ...]
@@ -213,8 +217,15 @@ def _turn_units(tokens: list[int], prompt_length: int, minimum: int):
         previous = end
 
 
-def _compress(node: _TurnNode, parent_id: int | None, start: int, inputs: list[Tensor],
-              segments: list[SegmentSpec], paths: dict[int, tuple[int, ...]], path: tuple[int, ...]) -> None:
+def _compress(
+    node: _TurnNode,
+    parent_id: int | None,
+    start: int,
+    inputs: list[Tensor],
+    segments: list[SegmentSpec],
+    paths: dict[int, tuple[int, ...]],
+    path: tuple[int, ...],
+) -> None:
     # Explicit DFS preserves insertion order without a Python recursion limit
     # on long conversations with terminal rows at many successive Turn nodes.
     pending = [(node, parent_id, start, path)]
@@ -223,16 +234,19 @@ def _compress(node: _TurnNode, parent_id: int | None, start: int, inputs: list[T
         while not node.terminal_rows and len(node.children) == 1:
             node = next(iter(node.children.values()))
         segment_id = len(segments)
-        segments.append(SegmentSpec(segment_id, parent_id, inputs[node.source_row][start:node.end], start, start))
+        segments.append(SegmentSpec(segment_id, parent_id, inputs[node.source_row][start : node.end], start, start))
         path = (*path, segment_id)
         paths.update((row, path) for row in node.terminal_rows)
         pending.extend((child, segment_id, node.end, path) for child in reversed(node.children.values()))
 
 
 def build_tree_execution_plans(
-    keys: list[str] | tuple[str, ...], batch: Any, *,
+    keys: list[str] | tuple[str, ...],
+    batch: Any,
+    *,
     require_loss_mask_alignment: bool = False,
-    tree_policy: str = "qwen_turn", turn_min_segment_tokens: int = 128,
+    tree_policy: str = "qwen_turn",
+    turn_min_segment_tokens: int = 128,
 ) -> ForestExecutionPlan:
     """Build the sole executable topology and retain one ref per masked response.
 
@@ -242,8 +256,11 @@ def build_tree_execution_plans(
     """
     if tree_policy != "qwen_turn":
         raise ValueError("Production TPR only supports qwen_turn")
-    if (not isinstance(turn_min_segment_tokens, int) or isinstance(turn_min_segment_tokens, bool)
-            or turn_min_segment_tokens < 1):
+    if (
+        not isinstance(turn_min_segment_tokens, int)
+        or isinstance(turn_min_segment_tokens, bool)
+        or turn_min_segment_tokens < 1
+    ):
         raise ValueError("turn_min_segment_tokens must be a positive integer")
     inputs, masks = _rows(batch, "input_ids"), _rows(batch, "response_mask")
     if len(keys) != len(inputs) or len(keys) != len(masks):
@@ -261,8 +278,13 @@ def build_tree_execution_plans(
     selected = []
     cpu_inputs = []
     for row, (key, tokens, mask) in enumerate(zip(keys, inputs, masks, strict=True)):
-        if (not tokens.numel() or tokens.dtype == torch.bool or torch.is_floating_point(tokens)
-                or torch.is_complex(tokens) or bool((tokens < 0).any())):
+        if (
+            not tokens.numel()
+            or tokens.dtype == torch.bool
+            or torch.is_floating_point(tokens)
+            or torch.is_complex(tokens)
+            or bool((tokens < 0).any())
+        ):
             raise ValueError(f"input_ids[{row}] must contain non-empty non-negative integer token ids")
         cpu_tokens = tokens.detach().to(device="cpu", dtype=torch.long)
         cpu_inputs.append(cpu_tokens)
@@ -314,10 +336,15 @@ def build_tree_execution_plans(
                 for offset in selected[row]:
                     target = response_start + offset
                     segment_id = path[bisect_right(ends, target - 1)]
-                    refs.append(SegmentObjectiveRef(
-                        segment_id, target - 1 - plan.get(segment_id).position_start,
-                        int(cpu_inputs[row][target]), row, offset,
-                    ))
+                    refs.append(
+                        SegmentObjectiveRef(
+                            segment_id,
+                            target - 1 - plan.get(segment_id).position_start,
+                            int(cpu_inputs[row][target]),
+                            row,
+                            offset,
+                        )
+                    )
             result.append(TreeExecutionPlan(uid, tree_index, tuple(child.member_rows), plan, tuple(refs)))
     return ForestExecutionPlan(tuple(result), sum(map(len, selected)))
 
@@ -347,8 +374,9 @@ def digest_forest_plan(forest: ForestExecutionPlan) -> str:
         _write_record(hasher, (tree.uid, tree.tree_index, tree.member_rows))
         _write_plan(hasher, tree.segment_plan)
         for ref in tree.objective_refs:
-            _write_record(hasher, (ref.segment_id, ref.query_offset, ref.target_token_id,
-                                   ref.sample_row, ref.response_offset))
+            _write_record(
+                hasher, (ref.segment_id, ref.query_offset, ref.target_token_id, ref.sample_row, ref.response_offset)
+            )
     return hasher.hexdigest()
 
 
@@ -374,15 +402,18 @@ def assert_tp_plan_agreement(digest: str, *, tp_size: int, cp_size: int = 1) -> 
     if not dist.is_available() or not dist.is_initialized():
         raise RuntimeError("TPR TP/CP requires an initialized distributed process group")
     axis = "TP×CP" if cp_size > 1 else "TP"
-    group = (parallel_state.get_tensor_and_context_parallel_group() if cp_size > 1
-             else parallel_state.get_tensor_model_parallel_group())
+    group = (
+        parallel_state.get_tensor_and_context_parallel_group()
+        if cp_size > 1
+        else parallel_state.get_tensor_model_parallel_group()
+    )
     if group is None:
         raise RuntimeError(f"TPR cannot resolve native Megatron {axis} group")
     if dist.get_world_size(group=group) != size:
         raise RuntimeError(f"TPR {axis} group size differs from Engine config")
     # HCCL AllGather supports int64, so store SHA256 as eight int64 words
     # (each word is a non-negative 32-bit unsigned value).
-    words = [int(digest[i:i + 8], 16) for i in range(0, 64, 8)]
+    words = [int(digest[i : i + 8], 16) for i in range(0, 64, 8)]
     device = torch.device("cpu")
     if dist.get_backend(group) != "gloo":
         from verl.utils.device import get_device_id, get_device_name

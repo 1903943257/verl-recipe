@@ -25,7 +25,6 @@ from megatron.core.transformer.transformer_block import TransformerBlock
 from verl_tpr.attention import TPRSelfAttention
 from verl_tpr.context import get_tpr_attention_context, use_tpr_attention_context
 
-
 # Development-only weak references: never keep checkpoint closures, KV tensors,
 # or per-segment attention contexts alive. Disabled in production by default.
 _RECOMPUTE_RUN_REFS: list[weakref.ReferenceType] = []
@@ -52,9 +51,7 @@ def validate_tpr_recompute_config(config: Any) -> bool:
         or getattr(config, "recompute_method", None) != "uniform"
         or getattr(config, "recompute_num_layers", None) != 1
     ):
-        raise NotImplementedError(
-            "TPR recompute prototype supports only full/uniform/1"
-        )
+        raise NotImplementedError("TPR recompute prototype supports only full/uniform/1")
     if getattr(config, "fp8", None) not in (False, None) or getattr(config, "fp4", None):
         raise NotImplementedError("TPR recompute does not support FP8/FP4")
     if getattr(config, "cpu_offloading", False) or getattr(config, "swap_attention", False):
@@ -76,9 +73,17 @@ def _checkpointed_tpr_forward(self: TransformerBlock, *args: Any, **kwargs: Any)
     bound.apply_defaults()
     p = bound.arguments
 
-    for name in ("context", "context_mask", "attention_bias", "packed_seq_params",
-                 "padding_mask", "rotary_pos_cos", "rotary_pos_sin",
-                 "rotary_pos_cos_sin", "sequence_len_offset"):
+    for name in (
+        "context",
+        "context_mask",
+        "attention_bias",
+        "packed_seq_params",
+        "padding_mask",
+        "rotary_pos_cos",
+        "rotary_pos_sin",
+        "rotary_pos_cos_sin",
+        "sequence_len_offset",
+    ):
         if p.get(name) is not None:
             raise NotImplementedError(f"TPR full recompute does not support {name}")
     if p.get("use_inner_quantization_context", False):
@@ -142,9 +147,7 @@ def _checkpointed_tpr_forward(self: TransformerBlock, *args: Any, **kwargs: Any)
                 _RECOMPUTE_RUN_REFS.append(weakref.ref(run_layer))
                 _RECOMPUTE_OUTER_REFS.append(weakref.ref(outer))
             if not hidden.requires_grad:
-                raise RuntimeError(
-                    "TPR full recompute needs a grad-carrying TransformerBlock input"
-                )
+                raise RuntimeError("TPR full recompute needs a grad-carrying TransformerBlock input")
             hidden, key, value = tensor_parallel.checkpoint(
                 run_layer,
                 False,  # distribute_saved_activations: intentionally gated off
@@ -172,8 +175,7 @@ def install_tpr_full_recompute(model: torch.nn.Module, config: Any) -> int:
     for block in blocks:
         if not getattr(block, "layers", None):
             raise NotImplementedError("TPR recompute requires a nonempty dense TransformerBlock")
-        if any(not isinstance(getattr(layer, "self_attention", None), TPRSelfAttention)
-               for layer in block.layers):
+        if any(not isinstance(getattr(layer, "self_attention", None), TPRSelfAttention) for layer in block.layers):
             raise NotImplementedError("TPR recompute currently requires dense FA layers")
 
     patched = 0
@@ -188,9 +190,7 @@ def install_tpr_full_recompute(model: torch.nn.Module, config: Any) -> int:
         native_fields = set(inspect.signature(native).parameters)
         required = {"hidden_states", "attention_mask", "rotary_pos_emb"}
         if not required <= native_fields:
-            raise NotImplementedError(
-                f"unsupported Megatron checkpoint signature: missing {required - native_fields}"
-            )
+            raise NotImplementedError(f"unsupported Megatron checkpoint signature: missing {required - native_fields}")
         block._tpr_native_checkpointed_forward = native
         block._checkpointed_forward = MethodType(_checkpointed_tpr_forward, block)
         block._tpr_full_recompute_installed = True

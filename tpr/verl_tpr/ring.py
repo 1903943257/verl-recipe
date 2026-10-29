@@ -32,64 +32,17 @@ import torch.distributed as dist
 from torch import Tensor
 
 # Keep the historical diagnostic and CP1 SBH import surface available.
-from verl_tpr.rectangular_attention import _compressed_causal_mask
-
-from .ring_layout import (
-    SequenceRange,
-    _validate_integer,
-    _validate_parallel_coordinates,
-    _normalize_dimension,
-    _validate_global_offset,
-    SequenceShard,
-    round_up_sequence_length,
-    iter_valid_sequence_slices,
-    resolve_cp_group,
-    _group_world_size_and_rank,
-    _TND_LAYOUT,
-    _RIGHT_DOWN_CAUSAL_MODE,
-    _FULL_ATTENTION_MODE,
-    _MAX_TOKENS,
-    RingBlockKind,
-    RingLocalKVBlock,
-    _RingAttentionConfig,
-    _RingStaticLayout,
-    _RingRangeSlice,
-    make_ring_sequence_shard,
-    classify_ring_block,
-    _load_mindspeed_ring_primitives,
-    _process_group_global_ranks,
-    _validate_ring_shard,
-    _validate_kv_pair,
-    _prepare_ring_layout,
-    ring_merge_settings,
-    _normalize_inputs,
-)
-
 from .ring_attention import (
-    _circulate_kv,
-    _iter_range_slices,
-    _can_coalesce_prefix_kv,
-    _prefix_full_slices,
-    _observe_ring_storage,
-    _can_coalesce_prefix_query,
-    _source_merged_prefix_kv,
-    _slice_tnd_result,
-    _trace_merged_query,
-    _range_validity,
-    _physical_block_attention_mask,
-    _block_attention_parameters,
-    _block_attention_forward,
-    _merge_attention,
-    _finalize_attention_result,
-    _flatten_tnd_softmax,
-    _unflatten_tnd_softmax,
-    _block_attention_backward,
-    _reduce_ring_gradients_to_owner,
-    _source_schedule,
-    _emit_ring_block_stats,
     _RingTPRAttention,
-    _trace_ring_block,
-    _trace_ring_storage,
+)
+from .ring_layout import (
+    RingLocalKVBlock,
+    SequenceShard,
+    _normalize_inputs,
+    _prepare_ring_layout,
+    _RingStaticLayout,
+    make_ring_sequence_shard,
+    resolve_cp_group,
 )
 
 if TYPE_CHECKING:
@@ -116,8 +69,12 @@ def ordinary_ring_cp_attention(
     reverse backward and owner dKV accumulation. No extra gradient SUM/cast.
     """
     _, config = _normalize_inputs(
-        query, current_key, current_value, prefix_blocks=(),
-        current_shard=current_shard, cp_group=cp_group,
+        query,
+        current_key,
+        current_value,
+        prefix_blocks=(),
+        current_shard=current_shard,
+        cp_group=cp_group,
         softmax_scale=softmax_scale,
     )
     if current_shard.global_length != current_shard.padded_length:
@@ -150,8 +107,13 @@ def ordinary_ring_cp_attention(
     # Native ordinary causal Ring consumes SBH, retaining GQA's smaller KV H.
     q, k, v = (x.flatten(2).contiguous() for x in (query, current_key, current_value))
     output = ringattn_context_parallel(
-        q, k, v, config.query_heads, cp_para,
-        softmax_scale=config.softmax_scale, dropout_p=0.0,
+        q,
+        k,
+        v,
+        config.query_heads,
+        cp_para,
+        softmax_scale=config.softmax_scale,
+        dropout_p=0.0,
     )
     if current_shard.valid_local_length != current_shard.local_length:
         # Native causal Ring can process physical trailing Query tokens, but
@@ -215,10 +177,7 @@ class RingCPAttentionBackend:
             or global_prefix_length < 0
         ):
             raise ValueError("global_prefix_length must be a non-negative integer")
-        normalized = {
-            layer: tuple(blocks)
-            for layer, blocks in sorted(prefix_blocks_by_layer.items())
-        }
+        normalized = {layer: tuple(blocks) for layer, blocks in sorted(prefix_blocks_by_layer.items())}
         if not normalized:
             raise ValueError("prefix_blocks_by_layer must contain every TPR layer")
         path_signature = None
@@ -283,14 +242,23 @@ class RingCPAttentionBackend:
                 and self._ring_layout.cp_rank == 0
                 and os.getenv("TPR_RING_BLOCK_STATS", "0") == "1"
             ):
-                print("TPR_FAST_ROOT_RING " + json.dumps({
-                    "backend": "mindspeed_native",
-                    "root_length": self._current_shard.global_length,
-                    "padded_length": self._current_shard.padded_length,
-                    "grad_enabled": torch.is_grad_enabled(),
-                }, sort_keys=True), flush=True)
+                print(
+                    "TPR_FAST_ROOT_RING "
+                    + json.dumps(
+                        {
+                            "backend": "mindspeed_native",
+                            "root_length": self._current_shard.global_length,
+                            "padded_length": self._current_shard.padded_length,
+                            "grad_enabled": torch.is_grad_enabled(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
             return ordinary_ring_cp_attention(
-                query, new_key, new_value,
+                query,
+                new_key,
+                new_value,
                 current_shard=self._current_shard,
                 cp_group=self._cp_group,
                 softmax_scale=softmax_scale,
@@ -306,8 +274,9 @@ class RingCPAttentionBackend:
             softmax_scale=softmax_scale,
             _layout=self._ring_layout,
             _trace_layer=(
-                layer_number if os.getenv("TPR_RING_BLOCK_STATS", "0") == "1"
-                and layer_number == self._first_layer else None
+                layer_number
+                if os.getenv("TPR_RING_BLOCK_STATS", "0") == "1" and layer_number == self._first_layer
+                else None
             ),
         )
 
@@ -325,8 +294,7 @@ def _prefix_blocks_by_layer(
     )
     return {
         layer: tuple(
-            RingLocalKVBlock(segment_id, state.shard, *state.key_values[layer])
-            for segment_id, state in sources
+            RingLocalKVBlock(segment_id, state.shard, *state.key_values[layer]) for segment_id, state in sources
         )
         for layer in expected_layer_numbers
     }
@@ -360,22 +328,29 @@ class RingCPBackend:
 
     def make_sequence_shard(self, global_length: int) -> SequenceShard:
         return make_ring_sequence_shard(
-            global_length, cp_rank=self.parallel_rank, cp_size=self.parallel_size,
+            global_length,
+            cp_rank=self.parallel_rank,
+            cp_size=self.parallel_size,
         )
 
     def make_attention_backend(
-        self, kv_stack: KVStack, *, expected_layer_numbers: tuple[int, ...],
-        current_shard: SequenceShard, past_anchors: PastKVAnchors | None,
+        self,
+        kv_stack: KVStack,
+        *,
+        expected_layer_numbers: tuple[int, ...],
+        current_shard: SequenceShard,
+        past_anchors: PastKVAnchors | None,
         use_native_root: bool = False,
     ) -> RingCPAttentionBackend:
         return RingCPAttentionBackend(
             global_prefix_length=(
-                kv_stack.prefix_length if past_anchors is None
-                else past_anchors.global_prefix_length
+                kv_stack.prefix_length if past_anchors is None else past_anchors.global_prefix_length
             ),
             current_shard=current_shard,
             prefix_blocks_by_layer=_prefix_blocks_by_layer(
-                kv_stack, past_anchors, expected_layer_numbers,
+                kv_stack,
+                past_anchors,
+                expected_layer_numbers,
             ),
             cp_group=self._cp_group,
             use_native_root=use_native_root,
@@ -422,12 +397,15 @@ def resolve_engine_cp_runtime(engine: Any, model_config: Any) -> TPREngineCPRunt
     return TPREngineCPRuntime(
         group=group,
         backend=RingCPBackend(group, parallel_size=size, parallel_rank=rank),
-        size=size, rank=rank,
+        size=size,
+        rank=rank,
     )
 
 
 def aggregate_cp_loss(
-    loss_sum: Tensor, normalized_loss: Tensor, runtime: TPREngineCPRuntime,
+    loss_sum: Tensor,
+    normalized_loss: Tensor,
+    runtime: TPREngineCPRuntime,
 ) -> tuple[Tensor, Tensor]:
     global_loss_sum = loss_sum.detach().clone()
     global_normalized_loss = normalized_loss.detach().clone()

@@ -117,8 +117,12 @@ class KVPrefixState:
     state_kind = "kv"
 
     def __init__(
-        self, segment_id: SegmentId, sequence_length: int, key_values: Mapping[int, KVPair],
-        *, shard: SequenceShard | None = None,
+        self,
+        segment_id: SegmentId,
+        sequence_length: int,
+        key_values: Mapping[int, KVPair],
+        *,
+        shard: SequenceShard | None = None,
     ) -> None:
         _validate_segment_id(segment_id)
         if not isinstance(sequence_length, int) or isinstance(sequence_length, bool) or sequence_length <= 0:
@@ -157,17 +161,15 @@ class KVPrefixState:
         self._ensure_live()
         normalized = _normalize_local_kv(self._key_values, local_length=self.local_length)
         if tuple(normalized) != self.layer_numbers or any(
-            old is not new for layer, pair in normalized.items()
+            old is not new
+            for layer, pair in normalized.items()
             for old, new in zip(self._key_values[layer], pair, strict=True)
         ):
             raise RuntimeError(f"segment {self.segment_id} KV storage or layers changed")
 
     def make_anchors(self) -> KVPrefixAnchors:
         leaves = MappingProxyType(
-            {
-                layer: tuple(t.detach().requires_grad_(True) for t in pair)
-                for layer, pair in self.key_values.items()
-            }
+            {layer: tuple(t.detach().requires_grad_(True) for t in pair) for layer, pair in self.key_values.items()}
         )
         return KVPrefixAnchors(self.segment_id, self.shard, self._generation, leaves)
 
@@ -194,11 +196,16 @@ class KVPrefixState:
             raise RuntimeError(f"KV prefix anchors for segment {anchors.segment_id} are stale")
         if tuple(anchors.key_values) != self.layer_numbers:
             raise RuntimeError(f"KV prefix anchor layers must be {self.layer_numbers}")
-        owned_storage = {
-            (tensor.device, tensor.untyped_storage().data_ptr())
-            for mapping in (self._key_values, self._gradients)
-            for pair in mapping.values() for tensor in pair
-        } if consume else set()
+        owned_storage = (
+            {
+                (tensor.device, tensor.untyped_storage().data_ptr())
+                for mapping in (self._key_values, self._gradients)
+                for pair in mapping.values()
+                for tensor in pair
+            }
+            if consume
+            else set()
+        )
         for layer, (key, value) in anchors.key_values.items():
             if key.grad is None or value.grad is None:
                 raise RuntimeError(f"layer {layer} KV prefix anchor gradient is missing")
@@ -276,8 +283,11 @@ class KVStack:
             raise KeyError(f"segment {segment_id} is not on the KV stack") from exc
 
     def push(
-        self, segment: SegmentSpec, key_values: Mapping[int, KVPair],
-        *, shard: SequenceShard | None = None,
+        self,
+        segment: SegmentSpec,
+        key_values: Mapping[int, KVPair],
+        *,
+        shard: SequenceShard | None = None,
     ) -> KVStackEntry:
         if segment.segment_id in self._entries:
             raise RuntimeError(f"segment {segment.segment_id} is already on the KV stack")

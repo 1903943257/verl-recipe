@@ -22,7 +22,7 @@ configuration path.  It does not read or mutate the process-wide
 from __future__ import annotations
 
 import math
-from functools import lru_cache
+from functools import cache
 
 import torch
 from torch import Tensor
@@ -34,7 +34,7 @@ _DEFAULT_PRE_TOKENS = 2**31 - 1
 _COMPRESSED_CAUSAL_MASK_SIZE = 2048
 
 
-@lru_cache(maxsize=None)
+@cache
 def _compressed_causal_mask(device: torch.device) -> Tensor:
     """Build the compressed bool mask expected by CANN sparse modes 2/3."""
 
@@ -95,20 +95,14 @@ def _validate_attention_mask(
     if attention_mask is None:
         return
     if not isinstance(attention_mask, Tensor):
-        raise TypeError(
-            f"attention_mask must be a torch.Tensor or None, got {type(attention_mask).__name__}"
-        )
+        raise TypeError(f"attention_mask must be a torch.Tensor or None, got {type(attention_mask).__name__}")
     if attention_mask.dtype != torch.bool:
         raise ValueError(f"attention_mask must use torch.bool, got {attention_mask.dtype}")
     if attention_mask.device != device:
-        raise ValueError(
-            f"attention_mask must be on {device}, got {attention_mask.device}"
-        )
+        raise ValueError(f"attention_mask must be on {device}, got {attention_mask.device}")
     expected_shape = (query_length, kv_length)
     if tuple(attention_mask.shape) != expected_shape:
-        raise ValueError(
-            f"attention_mask must have shape {expected_shape}, got {tuple(attention_mask.shape)}"
-        )
+        raise ValueError(f"attention_mask must have shape {expected_shape}, got {tuple(attention_mask.shape)}")
 
 
 def _attention_mask_parameters(

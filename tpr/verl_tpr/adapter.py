@@ -32,10 +32,10 @@ from megatron.core.transformer.spec_utils import ModuleSpec, get_module
 from megatron.core.utils import get_model_config
 from torch import Tensor
 
-from verl_tpr.attention import TPRSelfAttention
 from verl.utils import tensordict_utils as tu
 from verl.utils.megatron_utils import unwrap_model
 from verl.utils.metric import AggregationType, Metric
+from verl_tpr.attention import TPRSelfAttention
 
 from .executor import SegmentEventProfiler, SegmentExecutor, prepare_replay_model, validate_replay_plan
 from .ring import aggregate_cp_loss, resolve_engine_cp_runtime
@@ -127,8 +127,11 @@ def _assert_finite_tree_loss(loss: Tensor, *, tp_size: int, cp_size: int) -> Non
         import torch.distributed as dist
         from megatron.core import parallel_state
 
-        group = (parallel_state.get_tensor_and_context_parallel_group() if cp_size > 1
-                 else parallel_state.get_tensor_model_parallel_group())
+        group = (
+            parallel_state.get_tensor_and_context_parallel_group()
+            if cp_size > 1
+            else parallel_state.get_tensor_model_parallel_group()
+        )
         if group is None:
             raise RuntimeError("TPR cannot resolve the loss-check model-parallel group")
         # All model-parallel peers reject before another tree or finalization;
@@ -147,15 +150,11 @@ def install_tpr_module_spec(provider: Any, *, bridge: Any | None = None) -> None
     if provider is None:
         if bridge is None:
             raise NotImplementedError(
-                "TPR model construction requires either a non-vanilla provider "
-                "or the vanilla bridge instance"
+                "TPR model construction requires either a non-vanilla provider or the vanilla bridge instance"
             )
         install_tpr_vanilla_mbridge_spec(bridge)
         return
-    provider.transformer_layer_spec = make_tpr_module_spec_provider(
-        provider.transformer_layer_spec
-    )
-
+    provider.transformer_layer_spec = make_tpr_module_spec_provider(provider.transformer_layer_spec)
 
 
 def _validate_tpr_parallel_sizes(sizes: dict[str, int], *, ppo: bool) -> int:
@@ -169,18 +168,21 @@ def _validate_tpr_parallel_sizes(sizes: dict[str, int], *, ppo: bool) -> int:
     production_dp2 = ppo and (tp, cp, dp) == (2, 2, 2)
     # Keep the isolated 10K parity matrix opt-in; do not broaden production.
     parity_10k_dp2 = (
-        ppo and dp == 2 and tp in (1, 2) and cp in (1, 2)
+        ppo
+        and dp == 2
+        and tp in (1, 2)
+        and cp in (1, 2)
         and os.getenv("TPR_EXPERIMENTAL_OFFLINE_DP2") == "1"
         and os.getenv("TPR_RUN_10K_PARALLEL_PARITY") == "1"
         and os.getenv("TPR_10K_PARITY_ONLY") == "1"
     )
-    supported_cp = (
-        (cp in (1, 2) if tp == 1 else cp in (1, 2, 4))
-        if ppo else (cp >= 1 if tp == 1 else cp in (1, 2, 4))
-    )
-    if (tp not in (1, 2) or not supported_cp
-            or any(sizes[k] != 1 for k in ("PP", "EP"))
-            or (dp != 1 and not (production_dp2 or parity_10k_dp2))):
+    supported_cp = (cp in (1, 2) if tp == 1 else cp in (1, 2, 4)) if ppo else (cp >= 1 if tp == 1 else cp in (1, 2, 4))
+    if (
+        tp not in (1, 2)
+        or not supported_cp
+        or any(sizes[k] != 1 for k in ("PP", "EP"))
+        or (dp != 1 and not (production_dp2 or parity_10k_dp2))
+    ):
         raise NotImplementedError(
             "TPR PPO supports TP1 CP1/2 DP1, TP2 CP1/2/4 DP1 and TP2 CP2 DP2; "
             f"PP=EP=1; other DP topologies and non-PPO DP2 are gated, got {sizes}"
@@ -188,21 +190,13 @@ def _validate_tpr_parallel_sizes(sizes: dict[str, int], *, ppo: bool) -> int:
     return tp
 
 
-def _validate_tpr_cp_combination(
-    tp_size: int, cp_runtime: Any, config: Any, *, ppo: bool
-) -> None:
+def _validate_tpr_cp_combination(tp_size: int, cp_runtime: Any, config: Any, *, ppo: bool) -> None:
     if cp_runtime.size <= 1:
         return
     if (ppo or tp_size > 1) and cp_runtime.backend_name != "ring":
-        raise NotImplementedError(
-            "TPR TP+CP PPO requires the tested Ring backend; "
-            f"got {cp_runtime.backend_name!r}"
-        )
+        raise NotImplementedError(f"TPR TP+CP PPO requires the tested Ring backend; got {cp_runtime.backend_name!r}")
     if tp_size > 1 and getattr(config, "sequence_parallel", False):
-        raise NotImplementedError(
-            "TP2+CP requires sequence_parallel=False; combined TP+SP+CP "
-            "has not been validated"
-        )
+        raise NotImplementedError("TP2+CP requires sequence_parallel=False; combined TP+SP+CP has not been validated")
 
 
 def _trajectory_keys_from_minibatch(data: Any) -> tuple[str, ...]:
@@ -254,8 +248,7 @@ def _assert_dense_model(model: Any) -> None:
     # Inspect the actual decoder slots, not just the presence of one supported
     # module somewhere in a potentially mixed model. Native VERL is unchanged.
     layers = getattr(getattr(model, "decoder", None), "layers", ())
-    if not layers or any(not isinstance(getattr(layer, "self_attention", None), TPRSelfAttention)
-                         for layer in layers):
+    if not layers or any(not isinstance(getattr(layer, "self_attention", None), TPRSelfAttention) for layer in layers):
         raise TypeError("TPR PPO requires every decoder layer to use TPRSelfAttention")
 
 
@@ -326,16 +319,14 @@ def run_tpr_forward_backward_batch(
     }
     if any(unsupported.values()):
         raise NotImplementedError(
-            "TPR PPO phase-4 does not support: "
-            + ", ".join(k for k, enabled in unsupported.items() if enabled)
+            "TPR PPO phase-4 does not support: " + ", ".join(k for k, enabled in unsupported.items() if enabled)
         )
     _assert_dense_model(model)
     prepared_model = prepare_replay_model(model)
 
     token_count = tu.get_non_tensor_data(data, key="batch_num_tokens", default=None)
     dp_size = tu.get_non_tensor_data(data, key="dp_size", default=None)
-    if (token_count is None or token_count <= 0
-            or dp_size != sizes["DP"]):
+    if token_count is None or token_count <= 0 or dp_size != sizes["DP"]:
         raise ValueError(
             "Engine must attach positive GLOBAL batch_num_tokens and the "
             f"actual dp_size={sizes['DP']} before TPR routing"
@@ -356,7 +347,9 @@ def run_tpr_forward_backward_batch(
         raise ValueError("TPR_TURN_MIN_SEGMENT_TOKENS must be a positive integer") from exc
     keys = _trajectory_keys_from_minibatch(data)
     forest = build_tree_execution_plans(
-        keys, data, tree_policy=tree_policy,
+        keys,
+        data,
+        tree_policy=tree_policy,
         turn_min_segment_tokens=turn_min_tokens,
     )
     if not forest.trees or not forest.logical_loss_tokens:
@@ -373,7 +366,9 @@ def run_tpr_forward_backward_batch(
     for tree_plan in forest.trees:
         if tree_plan.logical_loss_tokens:
             validate_replay_plan(
-                tree_plan.segment_plan, prepared_model, cp_size=cp_runtime.size,
+                tree_plan.segment_plan,
+                prepared_model,
+                cp_size=cp_runtime.size,
                 active_segment_ids=tree_plan.active_segment_ids,
             )
     # DP2+CP2 has twice the per-rank local sequence of the CP4 baseline.
@@ -387,7 +382,9 @@ def run_tpr_forward_backward_batch(
     if lp_chunk_tokens < 0:
         raise ValueError("TPR_PPO_LOGPROB_CHUNK_TOKENS must be nonnegative")
     objective = SegmentPPOObjectiveAdapter(
-        data, loss_function, dp_group=engine.get_data_parallel_group(),
+        data,
+        loss_function,
+        dp_group=engine.get_data_parallel_group(),
         log_prob_chunk_size=lp_chunk_tokens or None,
     )
 
@@ -410,7 +407,8 @@ def run_tpr_forward_backward_batch(
         nonlocal tree_number
         setup_start = time.perf_counter() if detailed_profile else None
         shard_for_segment = (
-            None if cp_runtime.backend is None
+            None
+            if cp_runtime.backend is None
             else lambda segment: cp_runtime.backend.make_sequence_shard(segment.length)
         )
         callback, counts = objective.bind_tree(tree_plan, shard_for_segment=shard_for_segment)
@@ -441,7 +439,8 @@ def run_tpr_forward_backward_batch(
 
     run_start = time.perf_counter() if detailed_profile else None
     loss = run_forest(
-        forest, run_one_tree,
+        forest,
+        run_one_tree,
         lambda: finalize(engine.module, None, force_all_reduce=True),
         no_sync_func,
     )
@@ -470,18 +469,13 @@ def run_tpr_forward_backward_batch(
         engine._tpr_captured_logit_parts = dict(objective.debug_logit_parts)
 
     logical_input_tokens = sum(int(row.numel()) for row in data["input_ids"].unbind())
-    unique_tree_tokens = sum(
-        segment.length for tree in forest.trees
-        for segment in tree.segment_plan.segments.values()
-    )
+    unique_tree_tokens = sum(segment.length for tree in forest.trees for segment in tree.segment_plan.segments.values())
     active_tree_tokens = sum(
         tree.segment_plan.get(segment_id).length for tree in forest.trees for segment_id in tree.active_segment_ids
     )
     # All segments share the original global batch denominator. Pass the
     # same additive objective to both legacy reduction slots.
-    _, global_normalized_loss = aggregate_cp_loss(
-        loss, loss, cp_runtime
-    )
+    _, global_normalized_loss = aggregate_cp_loss(loss, loss, cp_runtime)
     loss = float(global_normalized_loss.item())
     if detailed_profile:
         record_stage("whole_entry_host_ms", profile_origin)
@@ -539,10 +533,7 @@ def replace_self_attention_with_tpr(transformer_layer_spec: _SpecT) -> _SpecT:
 
     for index, layer_spec in enumerate(layer_specs):
         if not isinstance(layer_spec, ModuleSpec):
-            raise TypeError(
-                f"layer_specs[{index}] must be a ModuleSpec, "
-                f"got {type(layer_spec).__name__}"
-            )
+            raise TypeError(f"layer_specs[{index}] must be a ModuleSpec, got {type(layer_spec).__name__}")
         layer_submodules = layer_spec.submodules
         if not hasattr(layer_submodules, "self_attention"):
             raise ValueError(f"layer_specs[{index}] does not define self_attention submodules")
@@ -585,7 +576,6 @@ def make_tpr_module_spec_provider(
     return tpr_spec_provider
 
 
-
 def install_tpr_vanilla_mbridge_spec(bridge: Any) -> None:
     """Patch only this vanilla MBridge instance's lazy TransformerLayer spec.
 
@@ -595,9 +585,7 @@ def install_tpr_vanilla_mbridge_spec(bridge: Any) -> None:
     original = getattr(bridge, "_get_transformer_layer_spec", None)
     if not callable(original):
         raise TypeError(
-            "Vanilla MBridge TPR requires callable "
-            "bridge._get_transformer_layer_spec; got "
-            f"{type(original).__name__}"
+            f"Vanilla MBridge TPR requires callable bridge._get_transformer_layer_spec; got {type(original).__name__}"
         )
     if getattr(original, "_tpr_vanilla_mbridge_spec", False):
         return

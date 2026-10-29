@@ -9,8 +9,8 @@ vanilla PPO with token-mean aggregation, not sequence-level objectives.
 
 from __future__ import annotations
 
-from collections import defaultdict
 import os
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -53,14 +53,14 @@ def _metadata(batch: Any, key: str, default=None):
     return value.tolist() if isinstance(value, tu.NonTensorStack) else value
 
 
-def _selected_scaled_logits(logits: Tensor, positions: Tensor, temperatures: Tensor,
-                            query_indices: Tensor | None) -> Tensor:
+def _selected_scaled_logits(
+    logits: Tensor, positions: Tensor, temperatures: Tensor, query_indices: Tensor | None
+) -> Tensor:
     selected = logits[0].index_select(0, positions)
     # Keep the accepted BF16 selected-logit arithmetic by default. Real
     # Qwen3-4B PPO replay showed that unconditional FP32 promotion changed
     # logprobs and full gradients; opt in only for precision diagnostics.
-    if (selected.dtype in (torch.float16, torch.bfloat16)
-            and os.getenv("TPR_SELECTED_LOGITS_FP32", "0") == "1"):
+    if selected.dtype in (torch.float16, torch.bfloat16) and os.getenv("TPR_SELECTED_LOGITS_FP32", "0") == "1":
         selected = selected.float()
     if query_indices is not None:
         selected = selected.index_select(0, query_indices)
@@ -127,7 +127,8 @@ class SegmentPPOObjectiveAdapter:
         self.entropy_fn = entropy_fn or _native_entropy
         self.calculate_entropy = (
             bool(_metadata(batch, "calculate_entropy", default=False))
-            if calculate_entropy is None else bool(calculate_entropy)
+            if calculate_entropy is None
+            else bool(calculate_entropy)
         )
         self.dp_group = dp_group
         if log_prob_chunk_size is not None and (
@@ -135,10 +136,7 @@ class SegmentPPOObjectiveAdapter:
             or isinstance(log_prob_chunk_size, bool)
             or log_prob_chunk_size <= 0
         ):
-            raise ValueError(
-                f"log_prob_chunk_size must be a positive integer or None, "
-                f"got {log_prob_chunk_size!r}"
-            )
+            raise ValueError(f"log_prob_chunk_size must be a positive integer or None, got {log_prob_chunk_size!r}")
         self.log_prob_chunk_size = log_prob_chunk_size
         # Optional numerical probe only; disabled for ordinary training to
         # avoid device synchronization and host-side token materialization.
@@ -198,8 +196,7 @@ class SegmentPPOObjectiveAdapter:
                     raise ValueError("temperature must contain one value per PPO sample")
             else:
                 raise TypeError(
-                    "unsupported per-sample temperature type: "
-                    f"{type(temperature)!r}, value={temperature!r}"
+                    f"unsupported per-sample temperature type: {type(temperature)!r}, value={temperature!r}"
                 )
             if any(not 0 < value < float("inf") for value in values):
                 raise ValueError("temperature must be finite and positive")
@@ -323,16 +320,18 @@ class SegmentPPOObjectiveAdapter:
                     restore[key_id] = output_index
                     output_index += 1
                 indices = torch.tensor(key_ids, device=logits.device, dtype=torch.long)
-                outputs.append(checkpoint(
-                    log_probs_for_chunk,
-                    logits,
-                    positions[start:end],
-                    targets.index_select(0, indices),
-                    temps.index_select(0, indices),
-                    None if query_indices is None else query_indices.index_select(0, indices) - start,
-                    use_reentrant=False,
-                    preserve_rng_state=False,
-                ))
+                outputs.append(
+                    checkpoint(
+                        log_probs_for_chunk,
+                        logits,
+                        positions[start:end],
+                        targets.index_select(0, indices),
+                        temps.index_select(0, indices),
+                        None if query_indices is None else query_indices.index_select(0, indices) - start,
+                        use_reentrant=False,
+                        preserve_rng_state=False,
+                    )
+                )
             restore = torch.tensor(restore, device=logits.device, dtype=torch.long)
             unique_log_probs = torch.cat(outputs, dim=0).index_select(0, restore)
         else:
@@ -344,9 +343,13 @@ class SegmentPPOObjectiveAdapter:
                 unique_entropy = self.entropy_fn(scaled_logits.clone())
             if self.capture_logit_parts:
                 target_logits, lse = _logit_parts(scaled_logits, targets)
-                parts = list(zip(
-                    target_logits.cpu().tolist(), lse.cpu().tolist(), strict=True,
-                ))
+                parts = list(
+                    zip(
+                        target_logits.cpu().tolist(),
+                        lse.cpu().tolist(),
+                        strict=True,
+                    )
+                )
             unique_log_probs = self.log_prob_fn(scaled_logits, targets)
         if unique_log_probs.ndim != 1 or unique_log_probs.numel() != len(unique):
             raise ValueError("log_prob_fn must return one scalar per unique query/target/temperature")
@@ -376,6 +379,7 @@ class SegmentPPOObjectiveAdapter:
         # Packed model output is [lp0, ..., lp(R-1), unused_dummy] per row;
         # no_padding_2_padding extracts the first R entries for prompt_len=1.
         from tensordict import TensorDict
+
         from verl.utils import tensordict_utils as tu
 
         by_row: dict[int, list[int]] = defaultdict(list)
@@ -415,16 +419,16 @@ class SegmentPPOObjectiveAdapter:
             if not bool(response_rows[row][offsets].all()):
                 raise ValueError(f"objective ref points to a masked token on row {row}")
             idx = torch.tensor(selected, dtype=torch.long, device=dev)
-            output_fields["attention_mask"][local_row, :count+1] = 1
+            output_fields["attention_mask"][local_row, : count + 1] = 1
             output_fields["response_mask"][local_row, :count] = True
             output_fields["responses"][local_row, :count] = torch.tensor(
                 [refs[i].target_token_id for i in selected], device=dev
             )
             indices = torch.tensor(offsets, dtype=torch.long, device=dev)
             for key, source in field_rows.items():
-                output_fields[key][local_row, :count] = source[row].index_select(
-                    0, indices.to(source[row].device)
-                ).to(dev)
+                output_fields[key][local_row, :count] = (
+                    source[row].index_select(0, indices.to(source[row].device)).to(dev)
+                )
             for key, values in token_outputs.items():
                 values = values.index_select(0, idx)
                 packed[key].extend((values, values.new_zeros(1)))

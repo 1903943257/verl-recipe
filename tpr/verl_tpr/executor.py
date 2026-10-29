@@ -104,24 +104,18 @@ def build_suffix_rotary_pos_emb(
     )
     if not isinstance(rotary_pos_emb, Tensor):
         raise TypeError(
-            "TPR RoPE MVP requires standard RotaryEmbedding to return one tensor; "
-            f"got {type(rotary_pos_emb).__name__}"
+            f"TPR RoPE MVP requires standard RotaryEmbedding to return one tensor; got {type(rotary_pos_emb).__name__}"
         )
     if rotary_pos_emb.ndim != 4:
         raise ValueError(
-            "suffix rotary embedding must have shape [suffix, 1, 1, rotary_dim], "
-            f"got {rotary_pos_emb.shape}"
+            f"suffix rotary embedding must have shape [suffix, 1, 1, rotary_dim], got {rotary_pos_emb.shape}"
         )
     if rotary_pos_emb.shape[0] != suffix_length:
         raise ValueError(
-            f"suffix rotary embedding sequence length must be {suffix_length}, "
-            f"got {rotary_pos_emb.shape[0]}"
+            f"suffix rotary embedding sequence length must be {suffix_length}, got {rotary_pos_emb.shape[0]}"
         )
     if rotary_pos_emb.shape[1] != 1 or rotary_pos_emb.shape[2] != 1:
-        raise ValueError(
-            "TPR RoPE MVP requires singleton batch/head broadcast dimensions, "
-            f"got {rotary_pos_emb.shape}"
-        )
+        raise ValueError(f"TPR RoPE MVP requires singleton batch/head broadcast dimensions, got {rotary_pos_emb.shape}")
     if rotary_pos_emb.shape[3] <= 0:
         raise ValueError("suffix rotary embedding must have a positive rotary dimension")
     return rotary_pos_emb
@@ -157,8 +151,7 @@ def build_sharded_rotary_pos_emb(
     rotary_pos_emb = chunks[0] if len(chunks) == 1 else torch.cat(chunks, dim=0)
     if rotary_pos_emb.shape[0] != shard.local_length:
         raise RuntimeError(
-            f"sharded rotary embedding length must be {shard.local_length}, "
-            f"got {rotary_pos_emb.shape[0]}"
+            f"sharded rotary embedding length must be {shard.local_length}, got {rotary_pos_emb.shape[0]}"
         )
     return rotary_pos_emb
 
@@ -196,7 +189,9 @@ class PreparedReplayModel:
 
 
 def prepare_replay_model(
-    model: nn.Module, *, expected_layer_numbers: tuple[int, ...] | None = None,
+    model: nn.Module,
+    *,
+    expected_layer_numbers: tuple[int, ...] | None = None,
 ) -> PreparedReplayModel:
     """Inspect the model once per PPO batch, rather than twice for every tree."""
     if not isinstance(model, nn.Module):
@@ -209,14 +204,16 @@ def prepare_replay_model(
     if len(set(layers)) != len(layers):
         raise ValueError(f"expected_layer_numbers contains duplicates: {layers}")
     configs, dropouts = _replay_settings(model)
-    prepared = PreparedReplayModel(model, _model_device(model), tuple(sorted(layers)),
-                                   configs, dropouts)
+    prepared = PreparedReplayModel(model, _model_device(model), tuple(sorted(layers)), configs, dropouts)
     prepared.validate()
     return prepared
 
 
 def validate_replay_plan(
-    plan: SegmentPlan, prepared_model: PreparedReplayModel, *, cp_size: int = 1,
+    plan: SegmentPlan,
+    prepared_model: PreparedReplayModel,
+    *,
+    cp_size: int = 1,
     active_segment_ids: frozenset[SegmentId] | None = None,
 ) -> None:
     """Fail before model execution when native TP+SP cannot split a segment.
@@ -266,24 +263,28 @@ class SegmentExecutor:
             prepared_model = prepare_replay_model(model, expected_layer_numbers=expected_layer_numbers)
         elif prepared_model.model is not model:
             raise ValueError("prepared_model belongs to a different model")
-        elif expected_layer_numbers is not None and tuple(sorted(expected_layer_numbers)) != prepared_model.layer_numbers:
+        elif (
+            expected_layer_numbers is not None and tuple(sorted(expected_layer_numbers)) != prepared_model.layer_numbers
+        ):
             raise ValueError("expected_layer_numbers differ from prepared_model")
         self.prepared_model = prepared_model
 
         if not callable(segment_loss_fn):
             raise TypeError("Production TPR requires a callable segment_loss_fn")
         counts = dict(segment_loss_term_counts or {})
-        if not counts or any(
-            segment_id not in plan.segments or count < 0
-            for segment_id, count in counts.items()
-        ):
+        if not counts or any(segment_id not in plan.segments or count < 0 for segment_id, count in counts.items()):
             raise ValueError("invalid PPO segment objective counts")
         if active_segment_ids is not None:
             active_segment_ids = frozenset(active_segment_ids)
-            if (not active_segment_ids.issubset(plan.segments) or any(
-                plan.get(segment_id).parent_id not in active_segment_ids
-                for segment_id in active_segment_ids if segment_id != plan.root_id
-            ) or any(count and segment_id not in active_segment_ids for segment_id, count in counts.items())):
+            if (
+                not active_segment_ids.issubset(plan.segments)
+                or any(
+                    plan.get(segment_id).parent_id not in active_segment_ids
+                    for segment_id in active_segment_ids
+                    if segment_id != plan.root_id
+                )
+                or any(count and segment_id not in active_segment_ids for segment_id, count in counts.items())
+            ):
                 raise ValueError("active_segment_ids must contain objective owners and all their ancestors")
         self.active_segment_ids = active_segment_ids
         self.segment_loss_fn = segment_loss_fn
@@ -302,7 +303,9 @@ class SegmentExecutor:
         self._native_root_ring_phase = os.getenv("TPR_ROOT_NATIVE_RING_PHASE", "both")
         if self._native_root_ring:
             _native_root_enabled_for_stage(
-                enabled=True, phase=self._native_root_ring_phase, no_grad=True,
+                enabled=True,
+                phase=self._native_root_ring_phase,
+                no_grad=True,
             )
         if cp_group is None:
             if cp_backend is not None:
@@ -319,7 +322,9 @@ class SegmentExecutor:
                 self.cp_backend = cp_backend
             elif cp_backend in (None, "ring", "megatron_cp_algo"):
                 self.cp_backend = RingCPBackend(
-                    cp_group, parallel_size=self.cp_size, parallel_rank=self.cp_rank,
+                    cp_group,
+                    parallel_size=self.cp_size,
+                    parallel_rank=self.cp_rank,
                 )
             else:
                 raise NotImplementedError("Production TPR only supports Ring CP")
@@ -327,11 +332,8 @@ class SegmentExecutor:
                 try:
                     self.cp_backend.validate_segment_length(segment.length)
                 except ValueError as exc:
-                    raise ValueError(
-                        f"segment {segment.segment_id} {exc}"
-                    ) from exc
-        validate_replay_plan(plan, prepared_model, cp_size=self.cp_size,
-                             active_segment_ids=active_segment_ids)
+                    raise ValueError(f"segment {segment.segment_id} {exc}") from exc
+        validate_replay_plan(plan, prepared_model, cp_size=self.cp_size, active_segment_ids=active_segment_ids)
         # Opt-in experiment: group equal-length siblings only. CP Ring still
         # requires batch=1, so never silently enable grouping on CP>1.
         self.leaf_batch_size = int(os.getenv("TPR_LEAF_BATCH_SIZE", "1"))
@@ -373,9 +375,16 @@ class SegmentExecutor:
                 segment = self.plan.get(segment_id[0] if grouped else segment_id)
                 children = () if grouped else self._children_of(segment_id)
                 kind = "visit_leaf_group" if grouped else "pop" if exiting else "push" if children else "visit_leaf"
-                profile = None if event_profiler is None else event_profiler.begin(
-                    segment, kind=kind, tree_index=tree_index, depth=depth,
-                    group_size=len(segment_id) if grouped else 1,
+                profile = (
+                    None
+                    if event_profiler is None
+                    else event_profiler.begin(
+                        segment,
+                        kind=kind,
+                        tree_index=tree_index,
+                        depth=depth,
+                        group_size=len(segment_id) if grouped else 1,
+                    )
                 )
                 if exiting:
                     losses.append(self.pop(segment_id))
@@ -384,10 +393,7 @@ class SegmentExecutor:
                 elif children:
                     self.push(segment_id)
                     pending.append((segment_id, True, depth))
-                    pending.extend(
-                        (item, False, depth + 1)
-                        for item in reversed(self._group_ready_children(children))
-                    )
+                    pending.extend((item, False, depth + 1) for item in reversed(self._group_ready_children(children)))
                 else:
                     losses.append(self.visit_leaf(segment_id))
                 if event_profiler is not None:
@@ -510,8 +516,10 @@ class SegmentExecutor:
 
             anchors = self.kv_stack.build_past_anchors()
             context, logits = self._forward(
-                segments[0], past_key_values=anchors.key_values,
-                no_grad=False, leaf_group=segments,
+                segments[0],
+                past_key_values=anchors.key_values,
+                no_grad=False,
+                leaf_group=segments,
             )
             self._assert_collected_layers(context)
             owned_losses: list[Tensor] = []
@@ -520,10 +528,13 @@ class SegmentExecutor:
                 row_logits = logits[index : index + 1]
                 loss = self._compute_loss(segment, row_logits)
                 normalized_losses.append(loss.detach())
-                owned_losses.append(self._prepare_backward_loss(
-                    loss, logits=row_logits,
-                    has_owned_loss=self._owned_loss_count(segment) > 0,
-                ))
+                owned_losses.append(
+                    self._prepare_backward_loss(
+                        loss,
+                        logits=row_logits,
+                        has_owned_loss=self._owned_loss_count(segment) > 0,
+                    )
+                )
             # Keep one backward root and one Prefix-anchor accumulation.
             torch.autograd.backward(torch.stack(owned_losses).sum())
             self.kv_stack.accumulate_anchor_gradients(anchors, consume=True)
@@ -533,14 +544,18 @@ class SegmentExecutor:
             return torch.stack(normalized_losses).sum()
 
     def _backward_segment(
-        self, segment: SegmentSpec, relayed_gradients: Mapping[int, KVPair] | None = None,
-        *, leaf: bool = False,
+        self,
+        segment: SegmentSpec,
+        relayed_gradients: Mapping[int, KVPair] | None = None,
+        *,
+        leaf: bool = False,
     ) -> Tensor:
         """Replay against independent ancestor anchors, then return their dKV."""
         relayed_gradients = relayed_gradients or {}
         anchors = self.kv_stack.build_past_anchors()
         context, logits = self._forward(
-            segment, no_grad=False,
+            segment,
+            no_grad=False,
             past_key_values={} if self.cp_enabled else anchors.key_values,
             sharded_past_anchors=anchors if self.cp_enabled else None,
         )
@@ -552,7 +567,9 @@ class SegmentExecutor:
         # Frozen current KV, however, has no graph to relay through.
         if leaf or count or self.cp_enabled:
             loss_root = self._prepare_backward_loss(
-                normalized_loss, logits=logits, has_owned_loss=count > 0,
+                normalized_loss,
+                logits=logits,
+                has_owned_loss=count > 0,
             )
             if loss_root.requires_grad:
                 roots.append(loss_root)
@@ -582,7 +599,15 @@ class SegmentExecutor:
             raise NotImplementedError("grouped TPR model forward supports CP1 only")
         local_token_ids = shard.select(segment.token_ids)
         if os.getenv("TPR_MEM_TRACE", "0") == "1":
-            print(f"TPR_MEM FORWARD_BEGIN segment={segment.segment_id} parent={segment.parent_id} prefix={segment.prefix_length} length={segment.length} local_length={shard.local_length} no_grad={no_grad} cp={self.cp_size} alloc_gib={torch.npu.memory_allocated() / (1024 ** 3):.3f} reserved_gib={torch.npu.memory_reserved() / (1024 ** 3):.3f}", flush=True)
+            print(
+                f"TPR_MEM FORWARD_BEGIN segment={segment.segment_id}"
+                f" parent={segment.parent_id} prefix={segment.prefix_length}"
+                f" length={segment.length} local_length={shard.local_length}"
+                f" no_grad={no_grad} cp={self.cp_size}"
+                f" alloc_gib={torch.npu.memory_allocated() / (1024**3):.3f}"
+                f" reserved_gib={torch.npu.memory_reserved() / (1024**3):.3f}",
+                flush=True,
+            )
         if leaf_group is None:
             input_ids = local_token_ids.to(device=device).unsqueeze(0)
         else:
@@ -624,14 +649,19 @@ class SegmentExecutor:
             compact_new_kv=no_grad,
         )
         rope_context = (
-            disable_bound_context_parallel_sharding(self.model.rotary_pos_emb)
-            if self.cp_enabled else nullcontext()
+            disable_bound_context_parallel_sharding(self.model.rotary_pos_emb) if self.cp_enabled else nullcontext()
         )
         with torch.set_grad_enabled(not no_grad), rope_context, use_tpr_attention_context(context):
             logits = self.model(input_ids=input_ids, position_ids=position_ids, attention_mask=None)
         self.model_forward_calls += 1
         if os.getenv("TPR_MEM_TRACE", "0") == "1":
-            print(f"TPR_MEM FORWARD_END segment={segment.segment_id} no_grad={no_grad} alloc_gib={torch.npu.memory_allocated() / (1024 ** 3):.3f} reserved_gib={torch.npu.memory_reserved() / (1024 ** 3):.3f}", flush=True)
+            print(
+                f"TPR_MEM FORWARD_END segment={segment.segment_id}"
+                f" no_grad={no_grad}"
+                f" alloc_gib={torch.npu.memory_allocated() / (1024**3):.3f}"
+                f" reserved_gib={torch.npu.memory_reserved() / (1024**3):.3f}",
+                flush=True,
+            )
         if not isinstance(logits, Tensor) or logits.ndim != 3:
             raise ValueError(f"model must return logits [batch, sequence, vocab], got {type(logits).__name__}")
         expected_shape = (len(leaf_group) if leaf_group is not None else 1, shard.local_length)
@@ -709,7 +739,6 @@ class SegmentExecutor:
         context.assert_new_kv_layers(self.expected_layer_numbers)
 
 
-
 def _model_device(model: nn.Module) -> torch.device:
     try:
         return next(model.parameters()).device
@@ -765,6 +794,8 @@ def _infer_layer_numbers(model: nn.Module) -> tuple[int, ...]:
             raise ValueError("cannot infer layer_number from model.decoder.layers")
         result.append(layer_number)
     return tuple(result)
+
+
 class SegmentEventProfiler:
     def __init__(self):
         self._pending = []
@@ -772,12 +803,8 @@ class SegmentEventProfiler:
         self.max_reserved_bytes = 0
 
     def begin(self, segment, *, kind: str, tree_index: int, depth: int, group_size: int = 1):
-        self.max_allocated_bytes = max(
-            self.max_allocated_bytes, int(torch.npu.max_memory_allocated())
-        )
-        self.max_reserved_bytes = max(
-            self.max_reserved_bytes, int(torch.npu.max_memory_reserved())
-        )
+        self.max_allocated_bytes = max(self.max_allocated_bytes, int(torch.npu.max_memory_allocated()))
+        self.max_reserved_bytes = max(self.max_reserved_bytes, int(torch.npu.max_memory_reserved()))
         # Reset the peak to attribute this event, without synchronizing the
         # device. Caller must reconstruct the overall max after execution.
         torch.npu.reset_peak_memory_stats()
@@ -802,29 +829,20 @@ class SegmentEventProfiler:
 
     def end(self, pending):
         pending["end_event"].record()
-        pending["cpu_enqueue_ms"] = (
-            time.perf_counter() - pending.pop("cpu_start")
-        ) * 1000.0
+        pending["cpu_enqueue_ms"] = (time.perf_counter() - pending.pop("cpu_start")) * 1000.0
         pending["alloc_after_bytes"] = int(torch.npu.memory_allocated())
         pending["reserved_after_bytes"] = int(torch.npu.memory_reserved())
         pending["peak_allocated_bytes"] = int(torch.npu.max_memory_allocated())
         pending["peak_reserved_bytes"] = int(torch.npu.max_memory_reserved())
-        self.max_allocated_bytes = max(
-            self.max_allocated_bytes, pending["peak_allocated_bytes"]
-        )
-        self.max_reserved_bytes = max(
-            self.max_reserved_bytes, pending["peak_reserved_bytes"]
-        )
+        self.max_allocated_bytes = max(self.max_allocated_bytes, pending["peak_allocated_bytes"])
+        self.max_reserved_bytes = max(self.max_reserved_bytes, pending["peak_reserved_bytes"])
         self._pending.append(pending)
 
     def materialize(self):
         """Call after torch.npu.synchronize() ONCE per mini-batch."""
         result = []
         for pending in self._pending:
-            record = {k: v for k, v in pending.items()
-                      if k not in ("start_event", "end_event")}
-            record["npu_event_ms"] = float(
-                pending["start_event"].elapsed_time(pending["end_event"])
-            )
+            record = {k: v for k, v in pending.items() if k not in ("start_event", "end_event")}
+            record["npu_event_ms"] = float(pending["start_event"].elapsed_time(pending["end_event"]))
             result.append(record)
         return result

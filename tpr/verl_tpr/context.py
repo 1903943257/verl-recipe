@@ -40,7 +40,8 @@ def _compact_kv_tensor(tensor: Tensor) -> Tensor:
     """Release oversized/view storage without copying an already compact tensor."""
 
     if (
-        tensor.is_contiguous() and tensor.storage_offset() == 0
+        tensor.is_contiguous()
+        and tensor.storage_offset() == 0
         and tensor.untyped_storage().nbytes() == tensor.numel() * tensor.element_size()
     ):
         return tensor
@@ -63,8 +64,13 @@ class TPRAttentionBackend(Protocol):
     def parallel_size(self) -> int: ...
 
     def attention(
-        self, layer_number: int, query: Tensor, new_key: Tensor, new_value: Tensor,
-        *, softmax_scale: float | None,
+        self,
+        layer_number: int,
+        query: Tensor,
+        new_key: Tensor,
+        new_value: Tensor,
+        *,
+        softmax_scale: float | None,
     ) -> Tensor: ...
 
 
@@ -74,7 +80,12 @@ def _validate_layer_number(layer: int) -> None:
 
 
 def _validate_kv_pair(
-    layer: int, key: Tensor, value: Tensor, *, expected_sequence_length: int, kind: str,
+    layer: int,
+    key: Tensor,
+    value: Tensor,
+    *,
+    expected_sequence_length: int,
+    kind: str,
     expected_batch_size: int = 1,
 ) -> None:
     if not isinstance(key, Tensor) or not isinstance(value, Tensor):
@@ -83,13 +94,10 @@ def _validate_kv_pair(
         raise ValueError(f"layer {layer} {kind} K/V must share shape [sequence, batch, heads, head_dim]")
     if key.shape[0] != expected_sequence_length:
         raise ValueError(
-            f"layer {layer} {kind} KV sequence length must be {expected_sequence_length}, "
-            f"got {key.shape[0]}"
+            f"layer {layer} {kind} KV sequence length must be {expected_sequence_length}, got {key.shape[0]}"
         )
     if key.shape[1] != expected_batch_size:
-        raise ValueError(
-            f"layer {layer} {kind} KV batch size must be {expected_batch_size}, got {key.shape[1]}"
-        )
+        raise ValueError(f"layer {layer} {kind} KV batch size must be {expected_batch_size}, got {key.shape[1]}")
     if key.device != value.device or key.dtype != value.dtype:
         raise ValueError(f"layer {layer} {kind} K/V device and dtype must match")
 
@@ -138,15 +146,19 @@ class TPRAttentionContext:
 
         backend = self.attention_backend
         if backend is not None:
-            required = ("global_prefix_length", "global_suffix_length", "local_suffix_length", "parallel_size", "attention")
+            required = (
+                "global_prefix_length",
+                "global_suffix_length",
+                "local_suffix_length",
+                "parallel_size",
+                "attention",
+            )
             missing = [name for name in required if not hasattr(backend, name)]
             if missing or not callable(getattr(backend, "attention", None)):
                 raise TypeError(f"attention_backend must implement TPRAttentionBackend; missing={missing}")
             if self.past_key_values:
                 raise ValueError("past_key_values must be empty when an attention_backend is active")
-            if (backend.global_prefix_length, backend.global_suffix_length) != (
-                self.prefix_length, self.suffix_length
-            ):
+            if (backend.global_prefix_length, backend.global_suffix_length) != (self.prefix_length, self.suffix_length):
                 raise ValueError("attention backend Prefix/Suffix lengths must match TPRAttentionContext")
             if backend.local_suffix_length <= 0:
                 raise ValueError("attention backend local suffix length must be positive")
@@ -198,8 +210,12 @@ class TPRAttentionContext:
         if layer_number in self._new_key_values:
             raise RuntimeError(f"new KV for layer {layer_number} was already recorded")
         _validate_kv_pair(
-            layer_number, key, value, expected_sequence_length=self.local_suffix_length,
-            kind="new", expected_batch_size=self.batch_size,
+            layer_number,
+            key,
+            value,
+            expected_sequence_length=self.local_suffix_length,
+            kind="new",
+            expected_batch_size=self.batch_size,
         )
         if self.compact_new_kv:
             if torch.is_grad_enabled():

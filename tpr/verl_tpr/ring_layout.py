@@ -123,9 +123,7 @@ class SequenceShard:
     def select(self, tensor: Tensor, *, dim: int = 0) -> Tensor:
         dim = _normalize_dimension(tensor, dim)
         if tensor.shape[dim] != self.global_length:
-            raise ValueError(
-                f"tensor sequence dimension must be {self.global_length}, got {tensor.shape[dim]}"
-            )
+            raise ValueError(f"tensor sequence dimension must be {self.global_length}, got {tensor.shape[dim]}")
         chunks = []
         for start, end in self.ranges:
             valid_start, valid_end = min(start, self.global_length), min(end, self.global_length)
@@ -234,14 +232,8 @@ class RingLocalKVBlock:
     value: Tensor
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.segment_id, int)
-            or isinstance(self.segment_id, bool)
-            or self.segment_id < 0
-        ):
-            raise ValueError(
-                f"segment_id must be a non-negative integer, got {self.segment_id!r}"
-            )
+        if not isinstance(self.segment_id, int) or isinstance(self.segment_id, bool) or self.segment_id < 0:
+            raise ValueError(f"segment_id must be a non-negative integer, got {self.segment_id!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,8 +306,7 @@ def make_ring_sequence_shard(
         padded_length = round_up_sequence_length(global_length, chunk_count)
     if padded_length < global_length or padded_length % chunk_count != 0:
         raise ValueError(
-            f"padded_length must cover {global_length} and be divisible by {chunk_count}, "
-            f"got {padded_length}"
+            f"padded_length must cover {global_length} and be divisible by {chunk_count}, got {padded_length}"
         )
     chunk_length = padded_length // chunk_count
     first_start = cp_rank * chunk_length
@@ -414,9 +405,7 @@ def _validate_kv_pair(
     if key.shape != value.shape:
         raise ValueError(f"{name} K/V shapes must match")
     if key.shape[0] != shard.local_length or key.shape[1] != 1:
-        raise ValueError(
-            f"{name} K/V must start with [{shard.local_length}, 1], got {tuple(key.shape)}"
-        )
+        raise ValueError(f"{name} K/V must start with [{shard.local_length}, 1], got {tuple(key.shape)}")
     if key.dtype != value.dtype or key.device != value.device:
         raise ValueError(f"{name} K/V dtype and device must match")
     if not key.is_floating_point():
@@ -440,7 +429,9 @@ def _prepare_ring_layout(
             raise ValueError(f"duplicate Prefix segment_id {block.segment_id}")
         seen.add(block.segment_id)
         _validate_ring_shard(
-            block.shard, cp_size=cp_size, cp_rank=cp_rank,
+            block.shard,
+            cp_size=cp_size,
+            cp_rank=cp_rank,
             name=f"Prefix block {block.segment_id}",
         )
         signature.append((block.segment_id, block.shard))
@@ -492,9 +483,7 @@ def _normalize_inputs(
     if not isinstance(query, Tensor) or query.ndim != 4:
         raise ValueError("query must have shape [sequence, batch, heads, head_dim]")
     if query.shape[0] != current_shard.local_length or query.shape[1] != 1:
-        raise ValueError(
-            f"query must start with [{current_shard.local_length}, 1], got {tuple(query.shape)}"
-        )
+        raise ValueError(f"query must start with [{current_shard.local_length}, 1], got {tuple(query.shape)}")
     if query.dtype != current_key.dtype or query.device != current_key.device:
         raise ValueError("query dtype/device must match Current KV")
     if query.shape[-1] != current_key.shape[-1]:
@@ -512,7 +501,9 @@ def _normalize_inputs(
                 raise ValueError(f"duplicate Prefix segment_id {block.segment_id}")
             seen.add(block.segment_id)
             _validate_ring_shard(
-                block.shard, cp_size=cp_size, cp_rank=cp_rank,
+                block.shard,
+                cp_size=cp_size,
+                cp_rank=cp_rank,
                 name=f"Prefix block {block.segment_id}",
             )
         _validate_kv_pair(
@@ -526,9 +517,7 @@ def _normalize_inputs(
         if block.key.dtype != current_key.dtype or block.key.device != current_key.device:
             raise ValueError(f"Prefix block {block.segment_id} dtype/device must match Current KV")
 
-    if _layout is not None and (
-        tuple((block.segment_id, block.shard) for block in blocks) != _layout.prefix_signature
-    ):
+    if _layout is not None and (tuple((block.segment_id, block.shard) for block in blocks) != _layout.prefix_signature):
         raise ValueError("prepared Ring layout does not match Prefix segment placement")
     scale = query.shape[-1] ** -0.5 if softmax_scale is None else softmax_scale
     if not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:

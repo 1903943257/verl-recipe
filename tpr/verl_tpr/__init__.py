@@ -1,4 +1,5 @@
 """Model-side TPR Attention/Context/CANN and lazy backwards exports."""
+
 from importlib import import_module
 
 # Public TPR model/runtime exports; no optional/legacy symbols in __all__.

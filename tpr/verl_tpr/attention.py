@@ -16,17 +16,16 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple, Union
 import os
+from typing import Optional
 
 import torch
-from torch import Tensor
-
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.models.common.embeddings.rope_utils import apply_rotary_pos_emb
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.transformer.attention import SelfAttention
 from megatron.core.typed_torch import apply_module
+from torch import Tensor
 
 from .context import TPRAttentionContext, get_tpr_attention_context
 from .rectangular_attention import rectangular_causal_attention
@@ -47,7 +46,7 @@ class TPRSelfAttention(SelfAttention):
         attention_mask: Tensor,
         key_value_states: Optional[Tensor] = None,
         inference_context: Optional[BaseInferenceContext] = None,
-        rotary_pos_emb: Optional[Union[Tensor, Tuple[Tensor, Tensor]]] = None,
+        rotary_pos_emb: Optional[Tensor | tuple[Tensor, Tensor]] = None,
         rotary_pos_cos: Optional[Tensor] = None,
         rotary_pos_sin: Optional[Tensor] = None,
         rotary_pos_cos_sin: Optional[Tensor] = None,
@@ -71,11 +70,17 @@ class TPRSelfAttention(SelfAttention):
         context = get_tpr_attention_context()
         if context is None:
             return super().forward(
-                hidden_states, attention_mask, rotary_pos_emb=rotary_pos_emb, **options,
+                hidden_states,
+                attention_mask,
+                rotary_pos_emb=rotary_pos_emb,
+                **options,
             )
 
         self._validate_tree_forward(
-            context=context, hidden_states=hidden_states, attention_mask=attention_mask, **options,
+            context=context,
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+            **options,
         )
         return self._tree_forward(hidden_states, context)
 
@@ -86,9 +91,18 @@ class TPRSelfAttention(SelfAttention):
     ) -> tuple[Tensor, Tensor | None]:
         # Reuse Megatron's projection, GQA reshaping, and optional Q/K norms.
         trace_mem = os.getenv("TPR_MEM_TRACE", "0") == "1"
+
         def trace(stage):
             if trace_mem:
-                print(f"TPR_MEM LAYER stage={stage} layer={self.layer_number} suffix={hidden_states.shape[0]} prefix={context.prefix_length} grad={torch.is_grad_enabled()} alloc_gib={torch.npu.memory_allocated() / (1024 ** 3):.3f} reserved_gib={torch.npu.memory_reserved() / (1024 ** 3):.3f}", flush=True)
+                print(
+                    f"TPR_MEM LAYER stage={stage} layer={self.layer_number}"
+                    f" suffix={hidden_states.shape[0]} prefix={context.prefix_length}"
+                    f" grad={torch.is_grad_enabled()}"
+                    f" alloc_gib={torch.npu.memory_allocated() / (1024**3):.3f}"
+                    f" reserved_gib={torch.npu.memory_reserved() / (1024**3):.3f}",
+                    flush=True,
+                )
+
         trace("BEFORE_QKV")
         output_gate = getattr(self.config, "attention_output_gate", False)
         qkv = self.get_query_key_value_tensors(
@@ -107,9 +121,11 @@ class TPRSelfAttention(SelfAttention):
         # Megatron ColumnParallelLinear owns SP all-gather on the QKV input.
         # The attention kernel and per-layer KVStack still see the *complete*
         # logical segment sequence, never an SP-local KV fragment.
-        if getattr(self.config, "sequence_parallel", False) and (
-            getattr(self.config, "tensor_model_parallel_size", 1) > 1
-        ) and query.shape[0] != context.local_suffix_length:
+        if (
+            getattr(self.config, "sequence_parallel", False)
+            and (getattr(self.config, "tensor_model_parallel_size", 1) > 1)
+            and query.shape[0] != context.local_suffix_length
+        ):
             raise ValueError(
                 "Megatron SP QKV projection must restore the full TPR segment: "
                 f"expected {context.local_suffix_length}, got {query.shape[0]}"
@@ -191,10 +207,7 @@ class TPRSelfAttention(SelfAttention):
                 f"TPR segment length {context.local_suffix_length} must be divisible "
                 f"by TP={tp_size} under native sequence parallelism (padding deferred)"
             )
-        expected_input_len = (
-            context.local_suffix_length // tp_size if sp_enabled
-            else context.local_suffix_length
-        )
+        expected_input_len = context.local_suffix_length // tp_size if sp_enabled else context.local_suffix_length
         if hidden_states.ndim != 3 or hidden_states.shape[1] != context.batch_size:
             raise ValueError(
                 f"TPR external-KV mode requires hidden_states [sequence, {context.batch_size}, hidden], "
@@ -235,7 +248,9 @@ class TPRSelfAttention(SelfAttention):
         if getattr(self.config, "window_size", None) is not None:
             raise NotImplementedError("TPR external-KV mode does not support window_size (sliding-window attention)")
         if getattr(self.config, "softmax_type", "vanilla") != "vanilla":
-            raise NotImplementedError("TPR external-KV mode requires softmax_type='vanilla'; sink softmax is unsupported")
+            raise NotImplementedError(
+                "TPR external-KV mode requires softmax_type='vanilla'; sink softmax is unsupported"
+            )
         core_attention = getattr(self.core_attention, "local_attn", self.core_attention)
         for name in ("softmax_offset", "pse"):
             if getattr(core_attention, name, None) is not None:
@@ -261,7 +276,7 @@ class TPRSelfAttention(SelfAttention):
             )
 
 
-def _as_rotary_pair(rotary_pos_emb: Union[Tensor, Tuple[Tensor, Tensor], None]) -> tuple[Tensor, Tensor]:
+def _as_rotary_pair(rotary_pos_emb: Tensor | tuple[Tensor, Tensor] | None) -> tuple[Tensor, Tensor]:
     if rotary_pos_emb is None:
         raise ValueError("suffix rotary position embedding is required")
     if isinstance(rotary_pos_emb, tuple):
@@ -274,7 +289,7 @@ def _as_rotary_pair(rotary_pos_emb: Union[Tensor, Tuple[Tensor, Tensor], None]) 
 
 
 def _validate_rotary_sequence_length(
-    rotary_pos_emb: Union[Tensor, Tuple[Tensor, Tensor]],
+    rotary_pos_emb: Tensor | tuple[Tensor, Tensor],
     suffix_length: int,
 ) -> None:
     for name, tensor in zip(("query", "key"), _as_rotary_pair(rotary_pos_emb), strict=True):
@@ -294,8 +309,7 @@ def _validate_past_compatibility(
     for name, past, new in (("K", past_key, new_key), ("V", past_value, new_value)):
         if past.shape[1:] != new.shape[1:]:
             raise ValueError(
-                f"layer {layer_number} past/new {name} shapes are incompatible: "
-                f"past={past.shape}, new={new.shape}"
+                f"layer {layer_number} past/new {name} shapes are incompatible: past={past.shape}, new={new.shape}"
             )
         if past.device != new.device or past.dtype != new.dtype:
             raise ValueError(
