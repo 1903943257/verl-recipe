@@ -71,7 +71,7 @@ The exact training image is environment-specific. Do not assume that an arbitrar
 On the host where the working training container exists, identify its image and architecture:
 
 ~~~bash
-TRAIN_CONTAINER=<name-or-id-of-the-working-training-container>
+TRAIN_CONTAINER=your-working-training-container-name
 TRAIN_IMAGE_ID=$(docker inspect "$TRAIN_CONTAINER" --format '{{.Image}}')
 docker inspect "$TRAIN_CONTAINER" --format 'configured_image={{.Config.Image}} image_id={{.Image}}'
 docker image inspect "$TRAIN_IMAGE_ID" --format '{{.Os}}/{{.Architecture}} {{.Id}}'
@@ -98,7 +98,7 @@ The example below assumes the host workspace is `/ssd_3/jyb/project/uniagent_lin
 
 ~~~bash
 export HOST_WORK=/ssd_3/jyb/project/uniagent_linear
-export TPR_TRAIN_IMAGE=<loaded-ascend-training-image-tag>
+export TPR_TRAIN_IMAGE=your-loaded-image:tag
 mkdir -p "$HOST_WORK"
 
 docker image inspect "$TPR_TRAIN_IMAGE" --format '{{.Os}}/{{.Architecture}}'
@@ -343,7 +343,7 @@ export MODEL_PATH=/workspace/hf_models/Qwen3-4B-128K
 export TRAIN_FILE=/workspace/tpr_experiments/shortfix/pelita875_hint_h2_arm64.parquet
 export TASK_CONFIG="$RECIPE_ROOT/tpr/task_config_swe_rebench_docker.yaml"
 
-export PYTHONPATH="$RECIPE_ROOT/tpr:$VERL_ROOT:$UNIAGENT_ROOT:$PYTHONPATH"
+export PYTHONPATH="$RECIPE_ROOT/tpr:$VERL_ROOT:$UNIAGENT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 python -m pip install --no-deps -e "$VERL_ROOT"
 python -m pip install --no-deps -e "$UNIAGENT_ROOT"
@@ -401,6 +401,7 @@ export TASK_CONFIG="$RECIPE_ROOT/tpr/task_config_swe_rebench_docker.yaml"
 export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES=1
 export RUN_ROOT="/workspace/tpr_experiments/recipe_smoke/tpr_arm64_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$(dirname "$RUN_ROOT")"
 
 set -o pipefail
 env \
