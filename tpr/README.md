@@ -43,7 +43,7 @@ python "$RECIPE_ROOT/tpr/prepare_swe_rebench_smoke.py" \
     --output ~/data/tpr/swe_rebench_pelita875.parquet
 ```
 
-The prepared task uses the official image `swerebench/sweb.eval.x86_64.aspp_1776_pelita-875:latest`.
+The prepared task uses the official image `swerebench/sweb.eval.x86_64.aspp_1776_pelita-875:latest` (`linux/amd64`, image ID `sha256:933103ac2f63e4d3ffcc8ffe769dfa38c7d4e85efc6ccfc3dcdba0b93617eaa6`).
 
 ## Training
 
