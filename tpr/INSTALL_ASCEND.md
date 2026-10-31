@@ -106,7 +106,7 @@ docker image inspect "$TPR_TRAIN_IMAGE" --format '{{.Os}}/{{.Architecture}}'
 NPU_SMI=$(command -v npu-smi)
 DEVICE_ARGS=()
 for i in $(seq 0 7); do
-  DEVICE_ARGS+=(--device="/dev/davinci\${i}")
+  DEVICE_ARGS+=(--device="/dev/davinci${i}")
 done
 
 docker run -d --name tpr-recipe-8npu \
@@ -115,7 +115,7 @@ docker run -d --name tpr-recipe-8npu \
   --shm-size=64g \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
-  "\${DEVICE_ARGS[@]}" \
+  "${DEVICE_ARGS[@]}" \
   --device=/dev/davinci_manager \
   --device=/dev/devmm_svm \
   --device=/dev/hisi_hdc \
