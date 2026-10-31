@@ -12,7 +12,7 @@ else
 fi
 
 if [[ -z "${UNIAGENT_ROOT:-}" ]]; then
-  for candidate in "${SCRIPT_DIR}/../../un-iagent" "${SCRIPT_DIR}/../../uni-agent"; do
+  for candidate in "${SCRIPT_DIR}/../../uni-agent"; do
     if [[ -f "${candidate}/uni_agent/framework/entry.py" ]]; then
       UNIAGENT_ROOT="${candidate}"
       break
@@ -29,6 +29,7 @@ TASK_CONFIG="${TASK_CONFIG:-${SCRIPT_DIR}/task_config_swe_rebench_docker.yaml}"
 [[ -f "${UNIAGENT_ROOT}/uni_agent/framework/entry.py" ]] || { echo "ERROR: invalid UNIAGENT_ROOT: ${UNIAGENT_ROOT}" >&2; exit 2; }
 [[ -f "${MODEL_PATH}/config.json" ]] || { echo "ERROR: missing model config: ${MODEL_PATH}/config.json" >&2; exit 2; }
 [[ -f "${TRAIN_FILE}" ]] || { echo "ERROR: missing TRAIN_FILE: ${TRAIN_FILE}" >&2; exit 2; }
+python3 "${SCRIPT_DIR}/check_task_images.py" --parquet "${TRAIN_FILE}" --platform linux/amd64
 [[ -f "${TASK_CONFIG}" ]] || { echo "ERROR: missing TASK_CONFIG: ${TASK_CONFIG}" >&2; exit 2; }
 
 # Resolve paths before changing to the VERL checkout.
