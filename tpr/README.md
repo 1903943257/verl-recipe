@@ -36,7 +36,7 @@ python -m pip install 'swebench==4.1.0' datasets pandas pyarrow
 
 ## Data
 
-Use the SWE-ReBench Parquet for your task and keep its official `sandbox.image` reference unchanged. Do not rewrite the Parquet or build a custom task image.
+For the Pelita smoke run, use `pelita875_hint_h2.parquet` (not the `_arm64` variant). Keep its official `sandbox.image` reference unchanged; do not rewrite the Parquet or build a custom task image.
 
 ## Training
 
