@@ -62,6 +62,7 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     Dataset.from_list([convert(row)]).to_parquet(str(args.output))
     print(f"wrote 1 instance to {args.output.resolve()}")
+    print(f"sandbox image: {get_image_name(args.instance_id)}")
 
 
 if __name__ == "__main__":
