@@ -7,4 +7,4 @@ GIT_SETUP=git clone https://github.com/verl-project/verl.git && cd verl && git c
 PATCH_CHECK=git apply --check /path/to/tpr/verl-tpr.patch
 PIP_INSTALL=pip install -e /path/to/tpr
 RECIPE_FOLDER=tpr
-NOTES=Clean pinned patch application and one-step ARM64 Ascend TP2xCP4xDP1 PPO E2E passed; see INSTALL_ASCEND.md. CC compaction/Chain lifecycle and Sandbox Reward install/proxy remain follow-ups.
+NOTES=Apply verl-tpr.patch to this pinned VERL checkout; see README.md for installation and launch instructions.
