@@ -21,7 +21,7 @@ if [[ -z "${UNIAGENT_ROOT:-}" ]]; then
 fi
 : "${UNIAGENT_ROOT:?Clone Uni-Agent beside the Recipe or set UNIAGENT_ROOT}"
 : "${MODEL_PATH:?Set MODEL_PATH to the local Qwen3 model directory}"
-: "${TRAIN_FILE:?Set TRAIN_FILE to the original SWE-ReBench Parquet}"
+TRAIN_FILE="${TRAIN_FILE:-${HOME}/data/tpr/swe_rebench_pelita875.parquet}"
 
 TASK_CONFIG="${TASK_CONFIG:-${SCRIPT_DIR}/task_config_swe_rebench_docker.yaml}"
 
@@ -29,7 +29,6 @@ TASK_CONFIG="${TASK_CONFIG:-${SCRIPT_DIR}/task_config_swe_rebench_docker.yaml}"
 [[ -f "${UNIAGENT_ROOT}/uni_agent/framework/entry.py" ]] || { echo "ERROR: invalid UNIAGENT_ROOT: ${UNIAGENT_ROOT}" >&2; exit 2; }
 [[ -f "${MODEL_PATH}/config.json" ]] || { echo "ERROR: missing model config: ${MODEL_PATH}/config.json" >&2; exit 2; }
 [[ -f "${TRAIN_FILE}" ]] || { echo "ERROR: missing TRAIN_FILE: ${TRAIN_FILE}" >&2; exit 2; }
-python3 "${SCRIPT_DIR}/check_task_images.py" --parquet "${TRAIN_FILE}" --platform linux/amd64
 [[ -f "${TASK_CONFIG}" ]] || { echo "ERROR: missing TASK_CONFIG: ${TASK_CONFIG}" >&2; exit 2; }
 
 # Resolve paths before changing to the VERL checkout.
@@ -41,6 +40,7 @@ TASK_CONFIG="$(cd -- "$(dirname -- "${TASK_CONFIG}")" && pwd -P)/$(basename -- "
 TEST_FILE="${TEST_FILE:-${TRAIN_FILE}}"
 TEST_FILE="$(cd -- "$(dirname -- "${TEST_FILE}")" && pwd -P)/$(basename -- "${TEST_FILE}")"
 [[ -f "${TEST_FILE}" ]] || { echo "ERROR: missing TEST_FILE: ${TEST_FILE}" >&2; exit 2; }
+python3 "${SCRIPT_DIR}/check_task_images.py" --parquet "${TRAIN_FILE}" --platform linux/amd64
 
 normalize_bool() {
   case "$1" in
