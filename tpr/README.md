@@ -1,17 +1,52 @@
-# Tree Prefix Reuse (TPR) Recipe
+# Tree Prefix Reuse (TPR)
 
-TPR is a training-side prefix-reuse runtime for VERL's Megatron engine.
+TPR enables training-side prefix reuse in VERL's Megatron engine.
 
-## Run
+## Required VERL version
 
-Follow the [TPR Recipe running guide](INSTALL_ASCEND.md).
+Use the revision in [REQUIRED_VERL.txt](REQUIRED_VERL.txt) and apply [verl-tpr.patch](verl-tpr.patch) to the VERL checkout.
 
-## Files
+## Environment
 
-- `verl_tpr/`: TPR runtime.
-- `verl-tpr.patch`: VERL integration patch.
-- `run_uniagent_rebench_ppo.sh`: PPO training launcher.
-- `task_config_swe_rebench_docker.yaml`: Docker Sandbox task configuration.
-- `REQUIRED_VERL.txt`: pinned VERL revision.
-- `INSTALL_ASCEND.md`: installation and running guide.
-- `ARCHITECTURE.md`: implementation structure.
+- Python 3.11 and a working Ascend NPU training environment.
+- VERL, Megatron-LM, MindSpeed, vLLM-Ascend and Ray.
+- Uni-Agent installed in a sibling checkout named `un-iagent` or `uni-agent`.
+- Docker CLI connected to the host Docker daemon through `/var/run/docker.sock`.
+- Eight available NPUs for the default configuration.
+
+The official SWE-ReBench Pelita task image is `linux/amd64`. On an ARM64 Docker host, enable amd64 QEMU/binfmt emulation or use an x86_64 Docker host. The task config requests `--platform=linux/amd64`.
+
+## Install
+
+From the workspace containing the VERL, Recipe and Uni-Agent checkouts:
+
+```bash
+export RECIPE_ROOT=/workspace/verl-recipe
+export VERL_ROOT=/workspace/verl
+export UNIAGENT_ROOT=/workspace/un-iagent
+
+VERL_COMMIT=$(sed -n 's/^VERL_COMMIT=//p' "$RECIPE_ROOT/tpr/REQUIRED_VERL.txt")
+git -C "$VERL_ROOT" checkout "$VERL_COMMIT"
+git -C "$VERL_ROOT" apply "$RECIPE_ROOT/tpr/verl-tpr.patch"
+
+python -m pip install -e "$RECIPE_ROOT/tpr"
+python -m pip install -e "$UNIAGENT_ROOT" --no-deps
+python -m pip install 'swebench==4.1.0' datasets pandas pyarrow
+```
+
+## Data
+
+Use the original SWE-ReBench Parquet and keep the official task image reference unchanged. Do not rewrite the Parquet or build a custom task image.
+
+## Training
+
+Set the model and dataset paths, then launch:
+
+```bash
+export MODEL_PATH=/path/to/Qwen3-4B-128K
+export TRAIN_FILE=/path/to/pelita875_hint_h2.parquet
+
+bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
+```
+
+The launcher defaults to one-node TP2 × CP4 × DP1, Ring CP, N=8, concurrency=8 and one PPO step. Override settings with environment variables when needed.
