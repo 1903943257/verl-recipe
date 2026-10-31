@@ -47,12 +47,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instance-id", default="ASPP__pelita-875")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--input-parquet", type=Path)
     args = parser.parse_args()
-    if args.input_parquet:
-        source = load_dataset("parquet", data_files=str(args.input_parquet), split="train")
-    else:
-        source = load_dataset("nebius/SWE-rebench", split="filtered", streaming=True)
+    source = load_dataset("nebius/SWE-rebench", split="filtered", streaming=True)
     row = next((sample for sample in source if sample["instance_id"] == args.instance_id), None)
     if row is None:
         raise SystemExit(f"instance not found: {args.instance_id}")
