@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-PElITA_IMAGE = "swerebench/sweb.eval.x86_64.aspp_1776_pelita-875"
-PElITA_IMAGE_ID = "sha256:933103ac2f63e4d3ffcc8ffe769dfa38c7d4e85efc6ccfc3dcdba0b93617eaa6"
+PELITA_IMAGE = "swerebench/sweb.eval.x86_64.aspp_1776_pelita-875"
+PELITA_IMAGE_ID = "sha256:933103ac2f63e4d3ffcc8ffe769dfa38c7d4e85efc6ccfc3dcdba0b93617eaa6"
 
 
 def normalize_arch(value: str) -> str:
@@ -55,7 +55,10 @@ def task_images(parquet_path: Path) -> list[str]:
     images: set[str] = set()
     for index, raw_info in enumerate(frame["extra_info"]):
         info = parse_mapping(raw_info)
-        task = info.get("tools_kwargs", {}).get("task", {})
+        tools_kwargs = info.get("tools_kwargs")
+        if not isinstance(tools_kwargs, dict):
+            raise ValueError(f"row {index} has no tools_kwargs mapping")
+        task = tools_kwargs.get("task", {})
         sandbox = task.get("sandbox", {}) if isinstance(task, dict) else {}
         image = sandbox.get("image") if isinstance(sandbox, dict) else None
         if not isinstance(image, str) or not image.strip():
@@ -95,7 +98,7 @@ def image_metadata(image: str) -> tuple[str, str, str]:
 
 
 def is_pinned_pelita_image(image: str) -> bool:
-    return image in {PElITA_IMAGE, f"{PElITA_IMAGE}:latest"}
+    return image in {PELITA_IMAGE, f"{PELITA_IMAGE}:latest"}
 
 
 def main() -> int:
@@ -142,10 +145,10 @@ def main() -> int:
                     f"{expected_os}/{expected_arch}"
                 )
 
-            if is_pinned_pelita_image(image) and image_id != PElITA_IMAGE_ID:
+            if is_pinned_pelita_image(image) and image_id != PELITA_IMAGE_ID:
                 raise RuntimeError(
                     "The official Pelita-875 image ID does not match the recorded original pull. "
-                    f"Expected {PElITA_IMAGE_ID}, got {image_id}. "
+                    f"Expected {PELITA_IMAGE_ID}, got {image_id}. "
                     "Check the registry tag before running the experiment."
                 )
 
