@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare one public SWE-reBench task for a Uni-Agent PPO smoke test.
+"""Prepare one task from the public SWE-ReBench filtered split for a Uni-Agent PPO smoke test."""Prepare one public SWE-reBench task for a Uni-Agent PPO smoke test.
 
 This is not the private pelita875_hint_h2.parquet dataset or its hint injection.
 """
