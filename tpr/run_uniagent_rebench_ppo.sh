@@ -11,10 +11,19 @@ else
   exit 2
 fi
 
-: "${UNIAGENT_ROOT:?Set UNIAGENT_ROOT to the UniAgent checkout}"
+if [[ -z "${UNIAGENT_ROOT:-}" ]]; then
+  for candidate in "${SCRIPT_DIR}/../../un-iagent" "${SCRIPT_DIR}/../../uni-agent"; do
+    if [[ -f "${candidate}/uni_agent/framework/entry.py" ]]; then
+      UNIAGENT_ROOT="${candidate}"
+      break
+    fi
+  done
+fi
+: "${UNIAGENT_ROOT:?Clone Uni-Agent beside the Recipe or set UNIAGENT_ROOT}"
 : "${MODEL_PATH:?Set MODEL_PATH to the local Qwen3 model directory}"
-: "${TRAIN_FILE:?Set TRAIN_FILE to the prepared SWE-ReBench task Parquet}"
-: "${TASK_CONFIG:?Set TASK_CONFIG to the UniAgent task YAML}"
+: "${TRAIN_FILE:?Set TRAIN_FILE to the original SWE-ReBench Parquet}"
+
+TASK_CONFIG="${TASK_CONFIG:-${SCRIPT_DIR}/task_config_swe_rebench_docker.yaml}"
 
 [[ -f "${VERL_ROOT}/verl/trainer/main_ppo.py" ]] || { echo "ERROR: invalid VERL_ROOT: ${VERL_ROOT}" >&2; exit 2; }
 [[ -f "${UNIAGENT_ROOT}/uni_agent/framework/entry.py" ]] || { echo "ERROR: invalid UNIAGENT_ROOT: ${UNIAGENT_ROOT}" >&2; exit 2; }
@@ -42,6 +51,8 @@ normalize_bool() {
 
 NNODES="${NNODES:-1}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
+export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES="${RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES:-1}"
 TRAIN_TP="${TRAIN_TP:-2}"
 TRAIN_PP="${TRAIN_PP:-1}"
 TRAIN_CP="${TRAIN_CP:-4}"
@@ -67,8 +78,8 @@ if [[ "${TPR_ENABLED}" == "True" && "${TRAIN_TP}" -gt 1 && "${TRAIN_CP}" -gt 1 &
 fi
 
 N="${N:-8}"
-MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-16384}"
-MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
+MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-18432}"
+MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-2048}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))}"
 ROLLOUT_TP="${ROLLOUT_TP:-2}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.60}"
