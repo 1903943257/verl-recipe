@@ -1,171 +1,73 @@
 # Tree Prefix Reuse (TPR) for VERL
 
-TPR is a training-side prefix-reuse runtime for VERL's Megatron engine. This recipe packages the runtime separately and uses a small, version-specific patch to connect it to VERL.
+TPR is a training-side prefix-reuse runtime for VERL's Megatron engine. The Recipe packages the runtime separately and uses a small, version-specific patch to connect it to VERL.
 
-## Status
+## Validation status
 
-Ruff lint/format, Python compilation and clean pinned VERL Patch application have been checked during the current manual acceptance run. Container imports, Hydra composition and a complete NPU PPO step remain pending.
+**A one-step NPU PPO E2E run has completed successfully** with the Recipe patch, runtime and launcher:
+
+- Hardware: one ARM64 host with 8 Ascend NPUs.
+- Topology: TP=2, CP=4 (Ring), PP=1, DP=1, SP=False.
+- Model: the locally prepared `Qwen3-4B-128K` checkpoint.
+- Task: `ASPP__pelita-875`, using the ARM64 task image.
+- Rollout: N=8, concurrency=8, prompt limit=18,432, response limit=2,048.
+- Training: `TPR_ENABLED=True`, one PPO training step completed.
+- Observed `actor/tpr/topology_token_reuse_ratio`: approximately 3.28x (logical input tokens / unique tree tokens).
+
+This is an end-to-end smoke test, **not** a controlled Full-vs-TPR performance claim.
+
+Known runtime follow-ups are documented in [INSTALL_ASCEND.md](INSTALL_ASCEND.md): Claude Code may compact or continue into another Gateway Chain after the per-trajectory capacity is reached, and the Sandbox Reward install step may be slow when it needs network access. Neither issue is hidden by this validation status.
 
 ## Contents
 
 - `verl_tpr/`: TPR runtime implementation.
 - `verl-tpr.patch`: version-specific changes to VERL's engine configuration and Megatron execution path.
-- `run_uniagent_rebench_ppo.sh`: one PPO example using UniAgent and SWE-ReBench.
+- `run_uniagent_rebench_ppo.sh`: Uni-Agent + SWE-ReBench PPO example launcher.
+- `task_config_swe_rebench_docker.yaml`: local Docker Sandbox task configuration.
 - `REQUIRED_VERL.txt`: pinned VERL revision for the patch.
-- `pyproject.toml`: standalone Python package metadata.
+- `INSTALL_ASCEND.md`: fresh-server installation, image preparation, and verified one-step run.
+- `ARCHITECTURE.md`: Recipe layout, VERL integration points, execution flow and support boundaries.
+- `scripts/rebuild_pelita_arm64.sh`: builds the ARM64 Pelita task image used by the validated run.
 
 ## Fresh-server installation
 
-Start with [INSTALL_ASCEND.md](INSTALL_ASCEND.md) for host Docker/image setup, the container environment, the local `un-iagent` directory (remote `verl-project/uni-agent`), Qwen model download, public SWE-reBench preparation and one-step acceptance. The shorter steps below assume those dependencies are already available.
-
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the Recipe file layout, the exact VERL integration points, the training execution flow, and the current support boundaries.
+Follow [INSTALL_ASCEND.md](INSTALL_ASCEND.md). It distinguishes the Ascend **training container image** from the per-task **SWE-ReBench Sandbox image**, and records the actual paths and command used for the successful run.
 
 ## Required VERL revision
 
-Use the exact commit recorded in `REQUIRED_VERL.txt`. The patch is based on the upstream VERL source tree, not on the private `verl-tpr` development fork.
+Use the exact commit recorded in `REQUIRED_VERL.txt`. The patch targets the upstream VERL source tree, not the private `verl-tpr` development fork.
 
-## Prerequisites
+## Quick start in the validated container
 
-This recipe is an integration layer, **not** a complete environment installer. It requires an existing, compatible Ascend NPU runtime with Python 3.11+, PyTorch/torch-npu, VERL/Megatron/MindSpeed, vLLM Ascend, Ray and UniAgent's runtime dependencies. Install these using the upstream/project environment guide first; do not overwrite packages in a working training environment.
+The following assumes the patched VERL checkout, Recipe, Uni-Agent, model, ARM64 task image and ARM64-adjusted Parquet are already present inside the same container:
 
-You also need:
+~~~bash
+export RECIPE_ROOT=/workspace/verl-recipe-pr165-fix-verify
+export VERL_ROOT=/workspace/verl-tpr-recipe-smoke
+export UNIAGENT_ROOT=/workspace/uni-agent
+export MODEL_PATH=/workspace/hf_models/Qwen3-4B-128K
+export TRAIN_FILE=/workspace/tpr_experiments/shortfix/pelita875_hint_h2_arm64.parquet
+export TASK_CONFIG="$RECIPE_ROOT/tpr/task_config_swe_rebench_docker.yaml"
 
-- A local Qwen3 model directory containing `config.json` and its checkpoints.
-- A prepared SWE-ReBench task Parquet with a `prompt` column and data compatible with UniAgent.
-- A Uni-Agent checkout (locally named `un-iagent`) containing `uni_agent/framework/entry.py`, its task YAML and required task/reward containers or credentials.
-- A dedicated allocation of **8 Ascend NPUs** for the example defaults. The launcher does not stop other Ray jobs or manage devices.
-- The **Recipe checkout, patched VERL checkout, UniAgent checkout, model and data visible in the same running environment**. If using Docker, make sure all host paths are mounted and use their container paths below.
-
-### Step 1 — Create a clean, pinned VERL checkout
-
-Do not patch your existing TPR development tree or switch an active training checkout. From a directory where GitHub access works (host or container), set the paths you will use:
-
-```bash
-export RECIPE_ROOT=/absolute/path/to/verl-recipe
-export VERL_ROOT=/absolute/path/to/new/verl-tpr-recipe-smoke
-PINNED_SHA=$(sed -n 's/^VERL_COMMIT=//p' "$RECIPE_ROOT/tpr/REQUIRED_VERL.txt")
-test -n "$PINNED_SHA" || { echo 'Missing VERL_COMMIT'; exit 1; }
-
-# Option A: clone upstream into a fresh directory (requires GitHub access)
-git clone https://github.com/verl-project/verl.git "$VERL_ROOT"
-git -C "$VERL_ROOT" checkout --detach "$PINNED_SHA"
-
-# Option B instead of clone: from a separate existing upstream VERL Git repo,
-# use: git -C /path/to/existing/verl worktree add --detach "$VERL_ROOT" "$PINNED_SHA"
-# Fetch the pinned SHA into that repo first if it is not available locally.
-
-test "$(git -C "$VERL_ROOT" rev-parse HEAD)" = "$PINNED_SHA"
-git -C "$VERL_ROOT" status --short
-```
-
-If Git operations run on the host but training runs inside a container, export `RECIPE_ROOT` and `VERL_ROOT` again using the **container-visible** paths before continuing.
-
-### Step 2 — Apply the version-specific patch
-
-Run inside the environment that can access both directories:
-
-```bash
-test -f "$VERL_ROOT/verl/trainer/main_ppo.py"
-git -C "$VERL_ROOT" apply --check "$RECIPE_ROOT/tpr/verl-tpr.patch"
-git -C "$VERL_ROOT" apply "$RECIPE_ROOT/tpr/verl-tpr.patch"
-git -C "$VERL_ROOT" diff --check
-git -C "$VERL_ROOT" diff --name-only
-```
-
-Expected changed VERL files: `verl/workers/config/engine.py` and `verl/workers/engine/megatron/transformer_impl.py`. The patch must apply cleanly to the pinned upstream revision. An already-patched or unclean checkout is **not** a valid clean-install acceptance test.
-
-### Step 3 — Install and verify the runtime
-
-In the **same Python environment that launches VERL on Ascend**:
-
-```bash
-python -m pip install -e "$RECIPE_ROOT/tpr" --no-deps
-bash -n "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
-export PYTHONPATH="$RECIPE_ROOT/tpr:$VERL_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-python - <<'PY'
-from pathlib import Path
-from dataclasses import fields
-from verl.workers.config.engine import McoreEngineConfig
-import verl_tpr
-from verl_tpr.adapter import install_tpr_module_spec, run_tpr_forward_backward_batch
-assert {'tpr_enabled'} <= {f.name for f in fields(McoreEngineConfig)}
-print('TPR import:', Path(verl_tpr.__file__).resolve())
-print('VERL Engine TPR config: OK')
-PY
-```
-
-The runtime's `pyproject.toml` intentionally does **not** install VERL, MindSpeed, or the Ascend framework dependencies. If the import fails, check that the correct training environment is active and that the pinned VERL checkout is first on `PYTHONPATH`.
-
-### Step 4 — Point the launcher at the external inputs
-
-Set all five required paths to real files inside the container; placeholders below must be replaced:
-
-```bash
-export VERL_ROOT=/absolute/path/to/patched/verl-tpr-recipe-smoke
-export UNIAGENT_ROOT=/workspace/src/un-iagent
-export MODEL_PATH=/absolute/path/to/Qwen3-4B-128K
-export TRAIN_FILE=/absolute/path/to/prepared-swe-rebench-task.parquet
-export TASK_CONFIG=/absolute/path/to/swe-rebench-task-config.yaml
-
-test -f "$VERL_ROOT/verl/trainer/main_ppo.py"
-test -f "$UNIAGENT_ROOT/uni_agent/framework/entry.py"
-test -f "$MODEL_PATH/config.json"
-test -f "$TRAIN_FILE"
-test -f "$TASK_CONFIG"
-```
-
-`TEST_FILE` defaults to `TRAIN_FILE`. A one-step smoke needs at least one usable task and its reward environment. The configured `MAX_PROMPT_LENGTH` must be long enough for the Parquet prompts after chat templating; filtering can otherwise leave no training examples. Do not assume the example downloads model weights, prepares tasks, or starts the task containers for you.
-
-### Step 5 — Launch one real TPR PPO training step
-
-From the NPU container, with a dedicated 8-NPU allocation and the paths above set:
-
-```bash
 export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES=1
-export RUN_ROOT=/absolute/path/to/outputs/tpr-recipe-smoke-1
+export RUN_ROOT="/workspace/tpr_experiments/recipe_smoke/tpr_$(date +%Y%m%d_%H%M%S)"
 
-NNODES=1 N_GPUS_PER_NODE=8 \
-TRAIN_TP=2 TRAIN_CP=4 TRAIN_PP=1 TRAIN_SP=False \
-TPR_ENABLED=True ACTOR_RECOMPUTE=True \
-N=8 CONCURRENCY=4 TOTAL_TRAINING_STEPS=1 TOTAL_EPOCHS=1 \
-bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
-```
+env NNODES=1 N_GPUS_PER_NODE=8 \
+  TRAIN_TP=2 TRAIN_CP=4 TRAIN_PP=1 TRAIN_SP=False \
+  TPR_ENABLED=True ACTOR_RECOMPUTE=True \
+  N=8 CONCURRENCY=8 \
+  TOTAL_TRAINING_STEPS=1 TOTAL_EPOCHS=1 \
+  MAX_PROMPT_LENGTH=18432 MAX_RESPONSE_LENGTH=2048 \
+  bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
+~~~
 
-By default, the script allows up to `MAX_PROMPT_LENGTH=16384` input tokens and `MAX_RESPONSE_LENGTH=8192` output tokens. Increase or decrease those limits only after checking your selected dataset and the available NPU memory. `TRAIN_CP=4` selects the Ring CP path internally, but successful startup alone does not demonstrate numerical equivalence with the Full baseline. `SESSION_HARD_CAP=True` should be enabled only on a UniAgent checkout that supports that feature.
+`TPR_ENABLED` is the only TPR enable/disable switch. CP uses the existing VERL `context_parallel_size`; CP>1 automatically uses the Recipe's Ring path. There is no separate TPR CP-backend selector.
 
-The script writes `launcher.log`, `agent/` and `ckpts/` beneath `RUN_ROOT` and refuses to overwrite an existing `launcher.log`. Set a **new** `RUN_ROOT` for every run. It does not install dependencies, patch VERL, clean Ray state or allocate devices.
+The launcher does not install the Ascend stack, patch VERL, create the task image, prepare the Parquet, stop Ray, or allocate devices. Use a dedicated 8-NPU allocation. It writes `launcher.log`, `agent/` and `ckpts/` under `RUN_ROOT`; use a new `RUN_ROOT` for each run.
 
-### Step 6 — Inspect the result and, optionally, run Full
+## Prerequisites and scope
 
-```bash
-grep -E 'TPR runtime import OK|TPR_ENABLED=|Topology:|Traceback|ERROR|Error|Exception' "$RUN_ROOT/launcher.log" | tail -80
-tail -100 "$RUN_ROOT/launcher.log"
-```
+This Recipe is an integration layer, **not** a complete Ascend environment installer. It requires a compatible Python 3.11+ Ascend environment with PyTorch/torch-npu, VERL/Megatron/MindSpeed, vLLM Ascend, Ray, Docker CLI access to the host Docker daemon, and Uni-Agent runtime dependencies.
 
-A successful acceptance run should complete one actor update without an exception, with `TPR_ENABLED=True` and `CP=4` shown in `launcher.log`. Check the actual training metrics and task/reward output rather than treating package import or launcher startup as E2E success.
-
-To smoke-test the native Full path, use the same external inputs and topology, but a **different** `RUN_ROOT` and `TPR_ENABLED=False`. Independent online rollouts are stochastic; their wall-clock times are not a controlled Full/TPR performance comparison. For numerical/performance claims, replay captured identical Actor mini-batches.
-
-## Common first-run failures
-
-| Symptom | Check |
-| --- | --- |
-| `git apply --check` fails | Upstream VERL SHA mismatch, pre-existing edits or patch already applied; start from a clean pinned checkout |
-| `wrong verl_tpr import` / import error | Editable install and `PYTHONPATH` point to a different runtime; ensure Recipe and VERL directories are visible inside Docker |
-| Hydra rejects `tpr_enabled` | Ensure the VERL patch is applied to the checkout loaded by Python and the launcher adds the Recipe-only key with `+actor_rollout_ref.actor.megatron.tpr_enabled=...`. CP>1 selects Ring automatically; no separate CP backend setting exists. |
-| TransferQueue `total_storage_size / num_data_storage_units` TypeError | The launcher sets `transfer_queue.backend.SimpleStorage.total_storage_size=100000`; if running a custom command, provide a numeric capacity when TransferQueue is enabled. |
-| Model or task path validation error | `MODEL_PATH`, `TRAIN_FILE`, `TASK_CONFIG` or `UNIAGENT_ROOT` missing/not mounted inside the container |
-| No examples after prompt filtering | `MAX_PROMPT_LENGTH` too small for the prepared Parquet; inspect actual input lengths |
-| Ring / MindSpeed import or kernel error | Ascend container dependencies/topology not compatible; inspect the first stack trace, not just the last Ray error |
-| Existing `launcher.log` | Use a new `RUN_ROOT`; the launcher intentionally avoids overwrites |
-
-## Validation status
-
-Ruff lint/format, Python compilation and clean pinned VERL Patch application have passed in the current manual acceptance run. **Container imports, Hydra composition and NPU E2E are not yet certified**. See [INSTALL_ASCEND.md](INSTALL_ASCEND.md) for the full installation path. The instructions above are the intended first-run acceptance procedure; they are not evidence that the example has already succeeded.
-
-## Scope
-
-TPR is an optional Megatron actor-training execution path. VERL continues to own PPO orchestration, rollout/reward integration, optimizer/scheduler, and distributed process groups. Experimental placement planners and unrelated profiling/test utilities are intentionally excluded from this recipe.
+TPR is an optional Megatron Actor-training execution path. VERL continues to own PPO orchestration, rollout/reward integration, optimizer/scheduler and distributed process groups. The stable user-facing TPR switch is `tpr_enabled`; CP>1 uses Ring automatically.
