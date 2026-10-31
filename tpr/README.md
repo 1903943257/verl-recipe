@@ -14,7 +14,7 @@ Use the revision in [REQUIRED_VERL.txt](REQUIRED_VERL.txt) and apply [verl-tpr.p
 - Docker CLI connected to the host Docker daemon through `/var/run/docker.sock`.
 - Eight available NPUs for the default configuration.
 
-The official SWE-ReBench Pelita task image is `linux/amd64`. On an ARM64 Docker host, enable amd64 QEMU/binfmt emulation or use an x86_64 Docker host. The task config requests `--platform=linux/amd64`.
+The task Parquet references the official image `swerebench/sweb.eval.x86_64.aspp_1776_pelita-875` (`linux/amd64`). On an ARM64 Docker host, enable amd64 QEMU/binfmt emulation or use an x86_64 Docker host. The task config requests `--platform=linux/amd64`. Verify the host can run it with `docker run --rm --platform linux/amd64 --entrypoint bash swerebench/sweb.eval.x86_64.aspp_1776_pelita-875 -lc 'uname -m'` (expected: `x86_64`).
 
 ## Install
 
@@ -36,7 +36,7 @@ python -m pip install 'swebench==4.1.0' datasets pandas pyarrow
 
 ## Data
 
-Use the original SWE-ReBench Parquet and keep the official task image reference unchanged. Do not rewrite the Parquet or build a custom task image.
+Use the SWE-ReBench Parquet for your task and keep its official `sandbox.image` reference unchanged. Do not rewrite the Parquet or build a custom task image.
 
 ## Training
 
