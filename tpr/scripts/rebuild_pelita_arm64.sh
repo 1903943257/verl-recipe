@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-IMAGE="\${IMAGE:-uniagent-swe-pelita-875:latest}"
-BUILD_DIR="\${BUILD_DIR:-/tmp/uniagent-swe-pelita-875-arm64}"
-BUILD_LOG="\${BUILD_LOG:-/tmp/uniagent-swe-pelita-875-arm64-build.log}"
+IMAGE="${IMAGE:-uniagent-swe-pelita-875:latest}"
+BUILD_DIR="${BUILD_DIR:-/tmp/uniagent-swe-pelita-875-arm64}"
+BUILD_LOG="${BUILD_LOG:-/tmp/uniagent-swe-pelita-875-arm64-build.log}"
 MINICONDA_SHA256="5afee04df06c923462341cfc87727100a67fa854550d0d7a2e6295005168e6b7"
 PELITA_COMMIT="68af15d8d4199882d32bb4ede363195e2c5b5a99"
 
@@ -44,11 +44,11 @@ ENV SHELL=/bin/bash
 ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl git gcc g++ make ripgrep procps file && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py39_25.1.1-2-Linux-aarch64.sh -o /tmp/miniconda.sh && \
-    echo "\${MINICONDA_SHA256}  /tmp/miniconda.sh" | sha256sum -c - && \
+    echo "${MINICONDA_SHA256}  /tmp/miniconda.sh" | sha256sum -c - && \
     bash /tmp/miniconda.sh -b -p /opt/conda && rm -f /tmp/miniconda.sh && ln -s /opt/conda /opt/miniconda3
 RUN conda create -y -n testbed python=3.9.25 pip && conda clean -afy
 RUN npm install --global @anthropic-ai/claude-code@2.1.161
-RUN git clone https://github.com/ASPP/pelita.git /testbed && cd /testbed && git checkout \${PELITA_COMMIT} && \
+RUN git clone https://github.com/ASPP/pelita.git /testbed && cd /testbed && git checkout ${PELITA_COMMIT} && \
     /opt/conda/envs/testbed/bin/python -m pip install --upgrade pip setuptools wheel && \
     /opt/conda/envs/testbed/bin/python -m pip install -e . pytest pytest-cov pytest-timestamper
 WORKDIR /testbed
