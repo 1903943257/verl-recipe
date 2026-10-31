@@ -67,15 +67,17 @@ docker image inspect uniagent-swe-pelita-875:latest \
 准备 SWE-ReBench Parquet 文件，并将任务镜像配置为 `uniagent-swe-pelita-875:latest`。以下示例基于已有的 Pelita Parquet：
 
 ~~~bash
+export DATA_SOURCE=/path/to/pelita875_hint_h2.parquet
 export TRAIN_FILE=/workspace/data/pelita875_hint_h2_arm64.parquet
 
 mkdir -p /workspace/data
 python - <<'PY'
 import copy
+import os
 import pandas as pd
 
-src = "/path/to/pelita875_hint_h2.parquet"
-dst = "/workspace/data/pelita875_hint_h2_arm64.parquet"
+src = os.environ["DATA_SOURCE"]
+dst = os.environ["TRAIN_FILE"]
 image = "uniagent-swe-pelita-875:latest"
 
 df = pd.read_parquet(src)
@@ -89,12 +91,12 @@ print(dst)
 PY
 ~~~
 
-将 Python 脚本中的 src 替换为实际 Parquet 路径。
+DATA_SOURCE 指向原始 Parquet 文件。
 
 ## 5. 配置运行参数
 
 ~~~bash
-export MODEL_PATH=/workspace/models/Qwen3-4B-128K
+export MODEL_PATH=/workspace/hf_models/Qwen3-4B-128K
 export TRAIN_FILE=/workspace/data/pelita875_hint_h2_arm64.parquet
 export TASK_CONFIG="$RECIPE_ROOT/tpr/task_config_swe_rebench_docker.yaml"
 
@@ -103,6 +105,9 @@ export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES=1
 
 export RUN_NAME=tpr-swe-rebench
 export RUN_ROOT=/workspace/outputs/$RUN_NAME
+
+test -f "$MODEL_PATH/config.json"
+test -f "$TRAIN_FILE"
 ~~~
 
 MODEL_PATH 指向本地 Qwen3 模型目录，TRAIN_FILE 指向准备好的 Parquet 文件。
