@@ -56,6 +56,6 @@ export TRAIN_FILE=~/data/tpr/swe_rebench_pelita875.parquet
 bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
 ```
 
-The launcher checks the task images before training: it pulls the image from the official registry, verifies its image ID and architecture, reports host/image architecture differences, and runs a Docker execution probe. On ARM64 hosts, amd64 emulation must be available.
+The launcher checks the task images before training: it pulls the image from the official registry, verifies its image ID and architecture, and runs a Docker execution probe. If the Docker host is ARM64 while the image is AMD64, it prints an explicit WARNING and tests QEMU/binfmt emulation; training stops if the image cannot run.
 
 The default configuration is one-node TP2 × CP4 × DP1, Ring CP, N=8, concurrency=8 and one PPO step. Override settings with environment variables when needed.
