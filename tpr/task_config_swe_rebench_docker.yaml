@@ -8,6 +8,8 @@
       pull_policy: missing
       pull_timeout: 1200
       start_timeout: 120
+      run_args:
+        - --platform=linux/amd64
   agent:
     name: claude_code
     max_turns: 100
