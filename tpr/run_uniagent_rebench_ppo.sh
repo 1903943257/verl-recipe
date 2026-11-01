@@ -59,7 +59,6 @@ TRAIN_CP="${TRAIN_CP:-4}"
 TRAIN_SP="$(normalize_bool "${TRAIN_SP:-False}")"
 TPR_ENABLED="$(normalize_bool "${TPR_ENABLED:-True}")"
 ACTOR_RECOMPUTE="$(normalize_bool "${ACTOR_RECOMPUTE:-True}")"
-SESSION_HARD_CAP="$(normalize_bool "${SESSION_HARD_CAP:-False}")"
 
 WORLD_SIZE=$((NNODES * N_GPUS_PER_NODE))
 PARALLEL_PRODUCT=$((TRAIN_TP * TRAIN_PP * TRAIN_CP))
@@ -249,7 +248,6 @@ python -m verl.trainer.main_ppo \
   ++actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.dispatch_mode=ray_task \
   ++actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.max_concurrent_sessions="${CONCURRENCY}" \
   ++actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.trajectory_selection=all \
-  ++actor_rollout_ref.rollout.custom.agent_framework.hard_stop_on_trajectory_capacity="${SESSION_HARD_CAP}" \
   ++actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.task_config_path="${TASK_CONFIG}" \
   ++actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.model_name="${MODEL_NAME}" \
   ++actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.report_reward=True \
