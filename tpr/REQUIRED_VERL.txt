@@ -1,9 +1,9 @@
-# Upstream VERL revision for the TPR integration patch
+# Upstream VERL revision verified with legacy MBridge on Ascend NPU
 UPSTREAM=https://github.com/verl-project/verl.git
 MODE=pinned_commit
-COMMIT=2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
-VERL_COMMIT=2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
-PIP_INSTALL=pip install verl@git+https://github.com/verl-project/verl.git@2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
-GIT_SETUP=git clone https://github.com/verl-project/verl.git && cd verl && git checkout 2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
+COMMIT=3efe38c759c14622fd1b2c9e3679f2d02f86bdac
+VERL_COMMIT=3efe38c759c14622fd1b2c9e3679f2d02f86bdac
+PIP_INSTALL=pip install verl@git+https://github.com/verl-project/verl.git@3efe38c759c14622fd1b2c9e3679f2d02f86bdac
+GIT_SETUP=git clone https://github.com/verl-project/verl.git && cd verl && git checkout 3efe38c759c14622fd1b2c9e3679f2d02f86bdac
 RECIPE_FOLDER=tpr
-NOTES=Apply tpr/verl-tpr.patch to this checkout before launching TPR.
+NOTES=Apply tpr/verl-tpr.patch after checkout; legacy mbridge 0.15.1 is required for this Ascend example.

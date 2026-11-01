@@ -204,6 +204,7 @@ python -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.ppo_max_token_len_per_gpu="${MAX_MODEL_LEN}" \
   actor_rollout_ref.actor.checkpoint.strict=False \
   actor_rollout_ref.actor.megatron.use_mbridge=True \
+  actor_rollout_ref.actor.megatron.vanilla_mbridge=True \
   actor_rollout_ref.actor.megatron.use_dist_checkpointing=False \
   actor_rollout_ref.actor.megatron.param_offload=True \
   actor_rollout_ref.actor.megatron.optimizer_offload=True \

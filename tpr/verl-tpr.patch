@@ -1,20 +1,23 @@
 diff --git a/verl/workers/config/engine.py b/verl/workers/config/engine.py
 --- a/verl/workers/config/engine.py
 +++ b/verl/workers/config/engine.py
-@@ -206,7 +206,9 @@ class McoreEngineConfig(EngineConfig):
-     override_ddp_config: dict[str, Any] = field(default_factory=dict)
-     override_transformer_config: dict[str, Any] = field(default_factory=dict)
+@@ -207,8 +207,10 @@
      override_mcore_model_config: dict[str, Any] = field(default_factory=dict)
      use_mbridge: bool = True
+     vanilla_mbridge: bool = False
      use_megatron_fsdp: bool = False
 +    # Optional Tree Prefix Reuse execution path.
 +    tpr_enabled: bool = False
      strategy: str = "megatron"
      qat: QATEngineConfig = field(default_factory=QATEngineConfig)
+ 
+     def __post_init__(self) -> None:
 diff --git a/verl/workers/engine/megatron/transformer_impl.py b/verl/workers/engine/megatron/transformer_impl.py
 --- a/verl/workers/engine/megatron/transformer_impl.py
 +++ b/verl/workers/engine/megatron/transformer_impl.py
-@@ -439,3 +439,8 @@ class MegatronEngine:
+@@ -481,8 +481,13 @@
+             use_megatron_fsdp=self.engine_config.use_megatron_fsdp,
+         )
          override_ddp_config = self._resolve_override_ddp_config()
  
 +        if self.engine_config.tpr_enabled:
@@ -23,7 +26,11 @@ diff --git a/verl/workers/engine/megatron/transformer_impl.py b/verl/workers/eng
 +            install_tpr_module_spec(self.provider, bridge=self.bridge)
 +
          module, updated_tf_config = make_megatron_module(
-@@ -449,4 +454,15 @@ class MegatronEngine:
+             wrap_config=wrap_config,
+             tf_config=self.tf_config,
+             hf_config=self.model_config.hf_config,
+@@ -493,8 +498,19 @@
+             peft_cls=self.peft_cls,
              peft_config=self.model_config.get("lora", None),
          )
          self.tf_config = updated_tf_config
@@ -39,13 +46,21 @@ diff --git a/verl/workers/engine/megatron/transformer_impl.py b/verl/workers/eng
 +            install_tpr_full_recompute(unwrap_model(module[0]), updated_tf_config)
 +
          print(f"module: {len(module)}")
-@@ -821,3 +837,9 @@ class MegatronEngine:
+ 
+         if self.engine_config.use_dist_checkpointing:
+             load_mcore_dist_weights(
+@@ -859,8 +875,14 @@
+                     routed_num_tokens, op=torch.distributed.ReduceOp.SUM, group=self.get_data_parallel_group()
+                 )
              tu.assign_non_tensor(data, routed_num_tokens=routed_num_tokens.item())
  
-+        # Keep all logical trajectories together before native micro-batch / DCP scheduling.
++        # Keep logical trajectories together before native micro-batch / DCP scheduling.
 +        if self.engine_config.tpr_enabled and not forward_only:
 +            from verl_tpr.adapter import run_tpr_forward_backward_batch
 +
 +            return run_tpr_forward_backward_batch(self, data, loss_function, forward_only=forward_only)
 +
          # BSHD path only: pad every micro-batch to the mini-batch's global max seq_len so the
+         # padded `s_q` is shared -> cuDNN plan built once per shape. Raw (unaligned)
+         # max; TP/CP/FP8 alignment is applied inside preprocess_bshd_engine.
+         pad_bshd_to_minibatch_max = self.engine_config.pad_bshd_to_minibatch_max
