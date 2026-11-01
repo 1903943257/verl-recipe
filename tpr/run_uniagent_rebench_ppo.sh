@@ -108,7 +108,21 @@ if [[ -z "${VLLM_ASCEND_ROOT:-}" ]]; then
   fi
 fi
 
-export PYTHONPATH="${SCRIPT_DIR}:${VERL_ROOT}:${UNIAGENT_ROOT}${VLLM_ASCEND_ROOT:+:${VLLM_ASCEND_ROOT}}${PYTHONPATH:+:${PYTHONPATH}}"
+# Some Ascend images ship Megatron-Bridge as source rather than a pip package.
+# VERL imports MindSpeed before Megatron so NPU TE compatibility patches are available.
+if [[ -z "${MEGATRON_BRIDGE_SRC:-}" ]]; then
+  for candidate in /workspace/Megatron-Bridge/src /Megatron-Bridge/src; do
+    if [[ -f "${candidate}/megatron/bridge/__init__.py" ]]; then
+      MEGATRON_BRIDGE_SRC="${candidate}"
+      break
+    fi
+  done
+fi
+if [[ -n "${MEGATRON_BRIDGE_SRC:-}" && ! -f "${MEGATRON_BRIDGE_SRC}/megatron/bridge/__init__.py" ]]; then
+  echo "ERROR: invalid MEGATRON_BRIDGE_SRC: ${MEGATRON_BRIDGE_SRC}" >&2
+  exit 2
+fi
+export PYTHONPATH="${MEGATRON_BRIDGE_SRC:+${MEGATRON_BRIDGE_SRC}:}${SCRIPT_DIR}:${VERL_ROOT}:${UNIAGENT_ROOT}${VLLM_ASCEND_ROOT:+:${VLLM_ASCEND_ROOT}}${PYTHONPATH:+:${PYTHONPATH}}"
 export TPR_TREE_POLICY
 export TPR_TURN_MIN_SEGMENT_TOKENS
 
@@ -127,6 +141,7 @@ CKPTS_DIR="${RUN_ROOT}/ckpts"
 mkdir -p "${AGENT_LOG_DIR}" "${CKPTS_DIR}"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
+echo "MEGATRON_BRIDGE_SRC=${MEGATRON_BRIDGE_SRC:-<not set>}"
 echo "VERL_ROOT=${VERL_ROOT}"
 echo "UNIAGENT_ROOT=${UNIAGENT_ROOT}"
 echo "MODEL_PATH=${MODEL_PATH}"
@@ -148,6 +163,14 @@ if expected not in actual.parents:
     raise SystemExit(f"wrong verl_tpr import: {actual}; expected under {expected}")
 from verl_tpr.adapter import install_tpr_module_spec, run_tpr_forward_backward_batch
 print(f"TPR runtime import OK: {actual}")
+PY
+
+# Check the same import ordering used by VERL on NPU: MindSpeed patches first,
+# Megatron-Bridge second. A plain Bridge import can fail without TE shims.
+python - <<'PY'
+import mindspeed.megatron_adaptor
+from verl.models.mcore.bridge import AutoBridge
+print(f"Megatron-Bridge import OK after MindSpeed patches: {AutoBridge}")
 PY
 
 RECOMPUTE_ARGS=()
@@ -204,7 +227,6 @@ python -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.ppo_max_token_len_per_gpu="${MAX_MODEL_LEN}" \
   actor_rollout_ref.actor.checkpoint.strict=False \
   actor_rollout_ref.actor.megatron.use_mbridge=True \
-  actor_rollout_ref.actor.megatron.vanilla_mbridge=True \
   actor_rollout_ref.actor.megatron.use_dist_checkpointing=False \
   actor_rollout_ref.actor.megatron.param_offload=True \
   actor_rollout_ref.actor.megatron.optimizer_offload=True \
