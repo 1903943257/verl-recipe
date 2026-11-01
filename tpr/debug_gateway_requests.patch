@@ -15,8 +15,8 @@ diff --git a/uni_agent/gateway/gateway.py b/uni_agent/gateway/gateway.py
 +from pathlib import Path
 +from typing import Any
  
- 
  import ray
+ from fastapi import FastAPI, HTTPException, Request
 @@ -50,9 +53,30 @@
  
  DEFAULT_ALLOWED_REQUEST_SAMPLING_KEYS = frozenset({"max_tokens", "stop"})
@@ -107,5 +107,5 @@ diff --git a/uni_agent/gateway/gateway.py b/uni_agent/gateway/gateway.py
 +            return anthropic_stream_response(outcome, model=model)
 +        return JSONResponse(anthropic_build_response(outcome, model=model))
  
- 
      async def start(self) -> None:
+         """Start the FastAPI server backing this gateway actor."""
