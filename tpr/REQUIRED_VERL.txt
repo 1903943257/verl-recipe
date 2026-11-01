@@ -1,10 +1,10 @@
-# TPR Recipe — pinned upstream VERL revision for verl-tpr.patch
+# Pinned upstream VERL revision required by tpr/verl-tpr.patch
 UPSTREAM=https://github.com/verl-project/verl.git
-MODE=pinned
+MODE=pinned_commit
 BRANCH=main
+COMMIT=2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
 VERL_COMMIT=2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
+PIP_INSTALL=pip install verl@git+https://github.com/verl-project/verl.git@2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
 GIT_SETUP=git clone https://github.com/verl-project/verl.git && cd verl && git checkout 2ab35292039a51175a4b3d3b3b2d76e951a0d3e4
-PATCH_CHECK=git apply --check /path/to/tpr/verl-tpr.patch
-PIP_INSTALL=pip install -e /path/to/tpr
 RECIPE_FOLDER=tpr
-NOTES=Apply verl-tpr.patch to this pinned VERL checkout; see README.md for installation and launch instructions.
+NOTES=Apply verl-tpr.patch separately and install the TPR package; see README.md.

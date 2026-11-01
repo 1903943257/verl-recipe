@@ -23,7 +23,7 @@ fi
 : "${MODEL_PATH:?Set MODEL_PATH to the local Qwen3 model directory}"
 TRAIN_FILE="${TRAIN_FILE:-${HOME}/data/tpr/swe_rebench_pelita875.parquet}"
 
-TASK_CONFIG="${TASK_CONFIG:-${SCRIPT_DIR}/task_config_swe_rebench_docker.yaml}"
+TASK_CONFIG="${TASK_CONFIG:-${SCRIPT_DIR}/configs/task_config_swe_rebench_docker.yaml}"
 
 [[ -f "${VERL_ROOT}/verl/trainer/main_ppo.py" ]] || { echo "ERROR: invalid VERL_ROOT: ${VERL_ROOT}" >&2; exit 2; }
 [[ -f "${UNIAGENT_ROOT}/uni_agent/framework/entry.py" ]] || { echo "ERROR: invalid UNIAGENT_ROOT: ${UNIAGENT_ROOT}" >&2; exit 2; }
@@ -40,7 +40,7 @@ TASK_CONFIG="$(cd -- "$(dirname -- "${TASK_CONFIG}")" && pwd -P)/$(basename -- "
 TEST_FILE="${TEST_FILE:-${TRAIN_FILE}}"
 TEST_FILE="$(cd -- "$(dirname -- "${TEST_FILE}")" && pwd -P)/$(basename -- "${TEST_FILE}")"
 [[ -f "${TEST_FILE}" ]] || { echo "ERROR: missing TEST_FILE: ${TEST_FILE}" >&2; exit 2; }
-PYTHONPATH="${UNIAGENT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" python3 "${SCRIPT_DIR}/check_task_images.py" --parquet "${TRAIN_FILE}" --task-config "${TASK_CONFIG}"
+PYTHONPATH="${UNIAGENT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" python3 "${SCRIPT_DIR}/scripts/check_task_images.py" --parquet "${TRAIN_FILE}" --task-config "${TASK_CONFIG}"
 
 normalize_bool() {
   case "$1" in
