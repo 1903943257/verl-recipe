@@ -53,7 +53,42 @@ python "$RECIPE_ROOT/tpr/prepare_swe_rebench_smoke.py"   --instance-id ASPP__pel
 export TRAIN_FILE=/workspace/tpr_data/swe_rebench_pelita875.parquet
 ```
 
-If Hugging Face is blocked, run this preprocessing on a network-enabled machine and copy the generated Parquet over. **Do not** use `pelita875_hint_h2.parquet` or `pelita875_hint_h2_arm64.parquet`. The Parquet contains a canonical public `swerebench/...x86_64...` image reference on **both** architectures.
+If Hugging Face is blocked, first check the previously prepared **unhinted** Uni-Agent task Parquet at `/workspace/tpr_experiments/shortfix/shortfix_candidates_task.parquet` (31 candidates). Extract the original `ASPP__pelita-875` row without rewriting the prompt or task metadata:
+
+```bash
+export SOURCE_PARQUET=/workspace/tpr_experiments/shortfix/shortfix_candidates_task.parquet
+export TRAIN_FILE=/workspace/tpr_data/swe_rebench_pelita875.parquet
+mkdir -p "$(dirname "$TRAIN_FILE")"
+
+python - <<'PY'
+import os
+from pathlib import Path
+import pandas as pd
+
+source = Path(os.environ["SOURCE_PARQUET"])
+dest = Path(os.environ["TRAIN_FILE"])
+frame = pd.read_parquet(source)
+assert "extra_info" in frame, "missing extra_info in local candidates"
+matched = []
+for i, extra in enumerate(frame["extra_info"]):
+    task = extra.get("tools_kwargs", {}).get("task", {}) if isinstance(extra, dict) else {}
+    metadata = task.get("metadata", {}) if isinstance(task, dict) else {}
+    if metadata.get("instance_id") == "ASPP__pelita-875":
+        matched.append(i)
+assert len(matched) == 1, f"expected one Pelita row, found {matched}"
+selected = frame.iloc[matched]
+task = selected.iloc[0]["extra_info"]["tools_kwargs"]["task"]
+image = task["sandbox"]["image"]
+assert image.startswith("swerebench/"), image
+assert "[TPR_TASK_HINT:" not in str(selected.iloc[0]["prompt"]), "hinted row"
+dest.parent.mkdir(parents=True, exist_ok=True)
+selected.to_parquet(dest, index=False)
+print(f"Saved unhinted Pelita row: {dest}")
+print(f"Original image reference: {image}")
+PY
+```
+
+This offline shortcut preserves the previously normalized, unhinted Uni-Agent task; it is not a new Hugging Face download. The raw 50-row filtered source was previously stored at `/workspace/data/swe_agent/swe_rebench_filtered_local.parquet`, if present on this host. **Do not** use `pelita875_hint_h2.parquet` or `pelita875_hint_h2_arm64.parquet`. The canonical original image reference remains in the Parquet on **both** architectures.
 
 ## 4. Docker Sandbox: choose one native platform
 
