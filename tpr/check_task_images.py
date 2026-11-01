@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pull and validate the official SWE-ReBench Docker images before training."""
+"""Validate task sandbox image mapping and native Docker architectures before training."""
 
 from __future__ import annotations
 
@@ -73,6 +73,7 @@ def task_images(parquet_path: Path, task_config: Path) -> list[str]:
     if not images:
         raise ValueError("No task images found in the Parquet")
     return sorted(images)
+
 
 def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
