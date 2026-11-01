@@ -6,6 +6,8 @@ TPR enables training-side prefix reuse in VERL's Megatron engine.
 
 Use the revision in [REQUIRED_VERL.txt](REQUIRED_VERL.txt) and apply [verl-tpr.patch](verl-tpr.patch) to the VERL checkout.
 
+See [Development and E2E validation](DEVELOPMENT.md) for the complete preparation and execution procedure, including the optional ARM64 sandbox.
+
 ## Environment
 
 - Python 3.11 and an Ascend NPU environment.
@@ -56,6 +58,6 @@ export TRAIN_FILE=~/data/tpr/swe_rebench_pelita875.parquet
 bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
 ```
 
-The launcher checks the task images before training: it pulls the image from the official registry, verifies its image ID and architecture, and runs a Docker execution probe. If the Docker host is ARM64 while the image is AMD64, it prints an explicit WARNING and tests QEMU/binfmt emulation; training stops if the image cannot run.
+The default sandbox uses the official AMD64 SWE-ReBench image on an AMD64 Docker host. On an ARM64 Docker host, use `task_config_swe_rebench_docker_arm64.yaml` and load the verified local ARM64 task image. The original Parquet is unchanged; Uni-Agent maps its image at runtime. QEMU is not used for E2E.
 
 The default configuration is one-node TP2 × CP4 × DP1, Ring CP, N=8, concurrency=8 and one PPO step. Override settings with environment variables when needed.

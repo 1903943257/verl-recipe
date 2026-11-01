@@ -40,7 +40,7 @@ TASK_CONFIG="$(cd -- "$(dirname -- "${TASK_CONFIG}")" && pwd -P)/$(basename -- "
 TEST_FILE="${TEST_FILE:-${TRAIN_FILE}}"
 TEST_FILE="$(cd -- "$(dirname -- "${TEST_FILE}")" && pwd -P)/$(basename -- "${TEST_FILE}")"
 [[ -f "${TEST_FILE}" ]] || { echo "ERROR: missing TEST_FILE: ${TEST_FILE}" >&2; exit 2; }
-python3 "${SCRIPT_DIR}/check_task_images.py" --parquet "${TRAIN_FILE}" --platform linux/amd64
+PYTHONPATH="${UNIAGENT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" python3 "${SCRIPT_DIR}/check_task_images.py" --parquet "${TRAIN_FILE}" --task-config "${TASK_CONFIG}"
 
 normalize_bool() {
   case "$1" in

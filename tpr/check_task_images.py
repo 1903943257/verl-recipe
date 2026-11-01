@@ -42,39 +42,37 @@ def parse_mapping(value: Any) -> dict[str, Any]:
     raise ValueError(f"Expected a mapping in extra_info, got {type(value).__name__}")
 
 
-def task_images(parquet_path: Path) -> list[str]:
-    try:
-        import pandas as pd
-    except ImportError as exc:
-        raise RuntimeError("pandas and pyarrow are required to inspect the task Parquet") from exc
+def task_images(parquet_path: Path, task_config: Path) -> list[str]:
+    """Resolve canonical sample images through Uni-Agent's image_map."""
+    import pandas as pd
+    from uni_agent.sandbox import SandboxConfig
+    from uni_agent.tasks.config import TaskConfigResolver
 
+    resolver = TaskConfigResolver.from_file(str(task_config))
     frame = pd.read_parquet(parquet_path)
     if "extra_info" not in frame.columns:
-        raise ValueError("Parquet is missing the extra_info column")
+        raise ValueError("Parquet is missing extra_info")
 
     images: set[str] = set()
     for index, raw_info in enumerate(frame["extra_info"]):
         info = parse_mapping(raw_info)
-        tools_kwargs = info.get("tools_kwargs")
-        if not isinstance(tools_kwargs, dict):
-            raise ValueError(f"row {index} has no tools_kwargs mapping")
-        task = tools_kwargs.get("task", {})
-        sandbox = task.get("sandbox", {}) if isinstance(task, dict) else {}
-        image = sandbox.get("image") if isinstance(sandbox, dict) else None
-        if not isinstance(image, str) or not image.strip():
-            raise ValueError(f"row {index} has no tools_kwargs.task.sandbox.image")
-        image = image.strip()
-        if not image.startswith("swerebench/"):
-            raise ValueError(
-                f"row {index} references non-official SWE-ReBench image {image!r}; "
-                "use the image reference generated from the public SWE-ReBench dataset"
-            )
-        images.add(image)
+        task = (info.get("tools_kwargs") or {}).get("task")
+        if not isinstance(task, dict):
+            raise ValueError(f"row {index}: missing task config")
+        sample_sandbox = task.get("sandbox") or {}
+        original = sample_sandbox.get("image")
+        if not isinstance(original, str) or not original.startswith("swerebench/"):
+            raise ValueError(f"row {index}: expected original SWE-ReBench image, got {original!r}")
+        resolved = resolver.resolve(task)
+        sandbox = SandboxConfig.model_validate(resolved["sandbox"])
+        if sandbox.provider != "docker" or not sandbox.image:
+            raise ValueError(f"row {index}: expected Docker sandbox with an image")
+        print(f"[image-check] row {index}: {original} -> {sandbox.image}")
+        images.add(sandbox.image)
 
     if not images:
         raise ValueError("No task images found in the Parquet")
     return sorted(images)
-
 
 def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -104,14 +102,13 @@ def is_pinned_pelita_image(image: str) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parquet", type=Path, required=True)
-    parser.add_argument("--platform", default="linux/amd64")
+    parser.add_argument("--task-config", type=Path, required=True)
+    parser.add_argument("--platform", default=None)
     args = parser.parse_args()
 
     if not args.parquet.is_file():
         parser.error(f"Parquet file not found: {args.parquet}")
 
-    expected_os, expected_arch = args.platform.split("/", maxsplit=1)
-    expected_arch = normalize_arch(expected_arch)
 
     try:
         daemon = run(["docker", "info", "--format", "{{.OSType}}/{{.Architecture}}"], capture=True)
@@ -120,19 +117,31 @@ def main() -> int:
         daemon_os, daemon_arch = daemon.stdout.strip().split("/", maxsplit=1)
         daemon_arch = normalize_arch(daemon_arch)
         host_arch = normalize_arch(platform.machine())
+        platform_name = args.platform or f"{daemon_os}/{daemon_arch}"
+        expected_os, expected_arch = platform_name.split("/", maxsplit=1)
+        expected_arch = normalize_arch(expected_arch)
 
         print(f"[image-check] Docker host: {daemon_os}/{daemon_arch}")
         print(f"[image-check] Runtime host: {platform.system().lower()}/{host_arch}")
         print(f"[image-check] Requested task platform: {expected_os}/{expected_arch}")
 
-        images = task_images(args.parquet)
+        images = task_images(args.parquet, args.task_config)
         print(f"[image-check] Found {len(images)} unique task image(s) in {args.parquet}")
 
         for image in images:
-            print(f"\n[image-check] Pulling official image: {image}")
-            pulled = run(["docker", "pull", image])
-            if pulled.returncode != 0:
-                raise RuntimeError(f"docker pull failed for {image}")
+            print(f"\n[image-check] Image: {image}")
+            inspected = run(["docker", "image", "inspect", "--format", "{{.Id}}", image], capture=True)
+            if inspected.returncode != 0:
+                if not image.startswith("swerebench/"):
+                    raise RuntimeError(f"Mapped image {image!r} is missing: load the verified ARM64 image first")
+                if daemon_arch != "amd64":
+                    raise RuntimeError(
+                        f"Official SWE-ReBench is AMD64, but Docker host is {daemon_arch}; "
+                        "select the ARM64 task config"
+                    )
+                pulled = run(["docker", "pull", "--platform", "linux/amd64", image])
+                if pulled.returncode != 0:
+                    raise RuntimeError(f"docker pull failed for {image}")
 
             image_id, image_os, image_arch = image_metadata(image)
             actual_platform = f"{image_os}/{image_arch}"
@@ -153,16 +162,15 @@ def main() -> int:
                 )
 
             if daemon_os != image_os or daemon_arch != image_arch:
-                print(
-                    f"[image-check] WARNING: Docker host {daemon_os}/{daemon_arch} differs "
-                    f"from task image {image_os}/{image_arch}."
+                raise RuntimeError(
+                    f"Docker host {daemon_os}/{daemon_arch} differs from {actual_platform}. "
+                    "Select a native image; QEMU E2E is not supported."
                 )
-                print("[image-check] Checking Docker platform emulation (QEMU/binfmt)...")
 
             probe = run(
                 [
                     "docker", "run", "--rm", "--pull", "never",
-                    "--platform", args.platform,
+                    "--platform", platform_name,
                     "--entrypoint", "/bin/bash",
                     image, "-lc", "uname -m",
                 ],
@@ -171,9 +179,7 @@ def main() -> int:
             if probe.returncode != 0:
                 detail = (probe.stderr or probe.stdout).strip()
                 raise RuntimeError(
-                    f"Cannot execute {image} as {args.platform}. "
-                    "Configure QEMU/binfmt emulation on the Docker host or use a matching "
-                    f"host architecture. Docker error: {detail}"
+                    f"Cannot execute {image} as {platform_name}. Docker error: {detail}"
                 )
 
             container_arch = probe.stdout.strip().splitlines()[-1]
@@ -183,9 +189,9 @@ def main() -> int:
                     f"Image execution reported uname -m={container_arch!r}; "
                     f"expected {expected_uname!r}"
                 )
-            print(f"[image-check] PASS: runnable as {args.platform}; uname -m={container_arch}")
+            print(f"[image-check] PASS: runnable as {platform_name}; uname -m={container_arch}")
 
-        print("\n[image-check] PASS: all task images are official, architecture-compatible, and runnable.")
+        print("\n[image-check] PASS: task images map correctly and run natively.")
         return 0
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[image-check] ERROR: {exc}", file=sys.stderr)
