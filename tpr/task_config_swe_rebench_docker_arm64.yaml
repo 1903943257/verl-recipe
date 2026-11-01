@@ -13,8 +13,6 @@
       start_timeout: 120
       run_args:
         - --platform=linux/arm64
-      run_args:
-        - --platform=linux/amd64
   agent:
     name: claude_code
     max_turns: 100
