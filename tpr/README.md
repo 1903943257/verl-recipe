@@ -7,7 +7,7 @@ TPR reuses shared prefixes across agent trajectories during VERL Megatron Actor 
 - **Model:** [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)
 - **Dataset:** [SWE-ReBench](https://huggingface.co/datasets/nebius/SWE-rebench)
 - **Training:** Uni-Agent + Claude Code with GRPO advantages
-- **Parallelism:** Ascend NPU, TP2 × CP4 × DP1
+- **Parallelism:** Tensor Parallelism (TP), Context Parallelism (CP), and Data Parallelism (DP)
 
 The `verl_tpr/` package implements prefix reuse, while `verl-tpr.patch` connects it to the VERL Megatron Engine.
 
@@ -82,8 +82,9 @@ The launcher runs one training step by default. Set `TOTAL_TRAINING_STEPS` for l
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `TRAIN_TP`, `TRAIN_CP`, `TRAIN_SP` | `2`, `4`, `False` | Actor parallelism |
+| `TRAIN_TP`, `TRAIN_PP`, `TRAIN_CP`, `TRAIN_SP` | `2`, `1`, `4`, `False` | Actor parallelism; DP is derived from the total NPU count |
 | `N`, `CONCURRENCY` | `8`, `8` | Trajectories and concurrent sessions |
 | `MAX_PROMPT_LENGTH`, `MAX_RESPONSE_LENGTH` | `18432`, `2048` | Sequence lengths |
-| `ACTOR_RECOMPUTE` | `True` | Activation recomputation |
+| `ACTOR_RECOMPUTE` | `True` | Enable full/uniform/1 activation recomputation |
+| `TPR_ENABLED` | `True` | Enable the TPR execution path |
 | `TOTAL_TRAINING_STEPS` | `1` | Training steps |
