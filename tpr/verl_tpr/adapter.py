@@ -158,34 +158,25 @@ def install_tpr_module_spec(provider: Any, *, bridge: Any | None = None) -> None
 
 
 def _validate_tpr_parallel_sizes(sizes: dict[str, int], *, ppo: bool) -> int:
-    """Support native VERL DP=2 in the tested TP2×RingCP2 PPO topology.
+    """Validate structural parallelism requirements without a TP/CP/DP whitelist.
 
-    DP replicas retain independent TPR forests: no cross-DP Prefix KV.
-    Standard VERL equal-cardinality dispatch and Megatron optimizer finalize
-    remain responsible for grouping and gradient synchronization.
+    TP and CP process groups are provided by Megatron; CP>1 uses the Ring
+    backend. DP replicas own independent TPR forests and rely on native VERL
+    dispatch, PPO normalization, and Megatron gradient finalization. Therefore
+    valid positive TP/CP/DP sizes are not restricted to a tested topology list.
+
+    Pipeline and expert parallel execution are different: the current TPR
+    executor runs one complete dense model chunk and has no stage-/expert-aware
+    KV or autograd transport, so PP and EP must remain one.
     """
-    tp, cp, dp = sizes["TP"], sizes["CP"], sizes["DP"]
-    production_dp2 = ppo and (tp, cp, dp) == (2, 2, 2)
-    # Keep the isolated 10K parity matrix opt-in; do not broaden production.
-    parity_10k_dp2 = (
-        ppo
-        and dp == 2
-        and tp in (1, 2)
-        and cp in (1, 2)
-        and os.getenv("TPR_EXPERIMENTAL_OFFLINE_DP2") == "1"
-        and os.getenv("TPR_RUN_10K_PARALLEL_PARITY") == "1"
-        and os.getenv("TPR_10K_PARITY_ONLY") == "1"
-    )
-    supported_cp = (cp in (1, 2) if tp == 1 else cp in (1, 2, 4)) if ppo else (cp >= 1 if tp == 1 else cp in (1, 2, 4))
-    if (
-        tp not in (1, 2)
-        or not supported_cp
-        or any(sizes[k] != 1 for k in ("PP", "EP"))
-        or (dp != 1 and not (production_dp2 or parity_10k_dp2))
-    ):
+    tp, cp, dp = (sizes[name] for name in ("TP", "CP", "DP"))
+    for name, value in (("TP", tp), ("CP", cp), ("DP", dp), ("PP", sizes["PP"]), ("EP", sizes["EP"])):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(f"{name} parallel size must be a positive integer, got {value!r}")
+    if sizes["PP"] != 1 or sizes["EP"] != 1:
         raise NotImplementedError(
-            "TPR PPO supports TP1 CP1/2 DP1, TP2 CP1/2/4 DP1 and TP2 CP2 DP2; "
-            f"PP=EP=1; other DP topologies and non-PPO DP2 are gated, got {sizes}"
+            "TPR currently requires PP=1 and EP=1; pipeline- and expert-parallel "
+            "KV/autograd transport is not implemented"
         )
     return tp
 
@@ -194,7 +185,7 @@ def _validate_tpr_cp_combination(tp_size: int, cp_runtime: Any, config: Any) -> 
     if cp_runtime.size <= 1:
         return
     if tp_size > 1 and getattr(config, "sequence_parallel", False):
-        raise NotImplementedError("TP2+CP requires sequence_parallel=False; combined TP+SP+CP has not been validated")
+        raise NotImplementedError("TP>1 with CP>1 requires sequence_parallel=False; combined TP+SP+CP has not been validated")
 
 
 def _trajectory_keys_from_minibatch(data: Any) -> tuple[str, ...]:
@@ -261,14 +252,13 @@ def run_tpr_forward_backward_batch(
 
     The Engine MUST compute batch_num_tokens / dp_size first. It MUST invoke
     this function BEFORE prepare_micro_batches, so shared trajectories remain
-    in the same logical mini-batch. Current training scope: dense Qwen/GPT,
-    TP=1/2, CP=1/2/4, PP=EP=1. Production DP2 supports TP2/CP2
-    with native VERL dispatch and Megatron gradient finalization; other
-    DP>1 combinations remain explicitly gated.
-    Ring required for CP>1,
-    and native SP is restricted to CP=1 at TP2.
-    Vanilla token-mean PPO; no native /M schedule
-    scaling is applied because SegmentExecutor performs autograd itself.
+    in the same logical mini-batch. TP/CP/DP sizes are taken from native
+    Megatron groups; DP replicas build independent forests and use native
+    gradient finalization. CP>1 uses Ring. TP>1 with CP>1 requires SP=False;
+    TP>1 with CP=1 may use native SP subject to segment divisibility.
+    The current executor requires PP=EP=VPP=1 and a dense causal model.
+    Vanilla token-mean PPO; no native /M schedule scaling is applied because
+    SegmentExecutor performs autograd itself.
     """
     from .objective import SegmentPPOObjectiveAdapter
     from .tree import build_tree_execution_plans
@@ -369,10 +359,10 @@ def run_tpr_forward_backward_batch(
                 cp_size=cp_runtime.size,
                 active_segment_ids=tree_plan.active_segment_ids,
             )
-    # DP2+CP2 has twice the per-rank local sequence of the CP4 baseline.
-    # Default this *isolated* experiment to recomputable PPO logprob chunks;
-    # ordinary TPR and all other topologies remain unchanged.
-    default_lp_chunk = "512" if sizes["DP"] == 2 and sizes["CP"] == 2 else "0"
+    # Multi-DP CP2 runs can have larger per-rank PPO log-prob intermediates
+    # than the CP4 reference topology. Chunking is a memory default, not a
+    # topology restriction; users can override it with TPR_PPO_LOGPROB_CHUNK_TOKENS.
+    default_lp_chunk = "512" if sizes["DP"] > 1 and sizes["CP"] == 2 else "0"
     try:
         lp_chunk_tokens = int(os.getenv("TPR_PPO_LOGPROB_CHUNK_TOKENS", default_lp_chunk))
     except ValueError as exc:
