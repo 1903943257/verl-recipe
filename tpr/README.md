@@ -13,16 +13,20 @@ The `verl_tpr/` package implements prefix reuse, while `verl-tpr.patch` connects
 
 ## Requirements
 
-An Ascend environment with Megatron-Core, MindSpeed, Ray, vLLM-Ascend and Megatron-Bridge source is required. The configuration uses eight NPUs (Megatron-Core 0.16.1, MindSpeed 0.16.0, torch-npu 2.9.0).
+An Ascend environment with Megatron-Core, MindSpeed, Ray, vLLM-Ascend and Megatron-Bridge is required. The example uses eight NPUs.
 
-The training container must access a Docker daemon for `linux/amd64` SWE-ReBench sandboxes. Uni-Agent installs Claude Code inside the sandbox automatically if network access is available; otherwise the sandbox image must already contain `claude`.
+The training container must have Docker CLI access to a host Docker daemon for `linux/amd64` SWE-ReBench sandboxes. Uni-Agent installs Claude Code inside the sandbox automatically when network access is available.
 
 ## Installation
 
-**On the host:** place this `verl-recipe` checkout in a directory mounted as `/workspace` inside the training container. Run the following commands from its parent directory:
+On the **host**, run these commands in a directory mounted as `/workspace` inside the training container:
 
 ```bash
+mkdir -p tpr-workspace
+cd tpr-workspace
+
 git clone https://github.com/verl-project/verl.git
+git clone https://github.com/verl-project/verl-recipe.git
 git clone https://github.com/verl-project/uni-agent.git
 
 VERL_COMMIT=$(sed -n 's/^VERL_COMMIT=//p' verl-recipe/tpr/REQUIRED_VERL.txt)
@@ -31,39 +35,38 @@ git -C verl apply --check ../verl-recipe/tpr/verl-tpr.patch
 git -C verl apply ../verl-recipe/tpr/verl-tpr.patch
 ```
 
-Apply the patch once to a clean checkout. See [REQUIRED_VERL.txt](REQUIRED_VERL.txt) for the pinned VERL version.
+Apply the patch once to a clean VERL checkout. See [REQUIRED_VERL.txt](REQUIRED_VERL.txt) for the pinned version.
 
-**Inside the training container:**
+Inside the **training container**:
 
 ```bash
-cd /workspace
-export VERL_ROOT=$PWD/verl
-export RECIPE_ROOT=$PWD/verl-recipe
-export UNIAGENT_ROOT=$PWD/uni-agent
-export MEGATRON_BRIDGE_SRC=/workspace/Megatron-Bridge/src
-export MODEL_PATH=/workspace/models/Qwen3-4B
+cd /workspace/tpr-workspace
+export VERL_ROOT=/workspace/tpr-workspace/verl
+export RECIPE_ROOT=/workspace/tpr-workspace/verl-recipe
+export UNIAGENT_ROOT=/workspace/tpr-workspace/uni-agent
+export MODEL_PATH=/workspace/hf_models/Qwen3-4B
 
 python -m pip install -e "$UNIAGENT_ROOT" --no-deps
 python -m pip install 'swebench==4.1.0' datasets pandas pyarrow huggingface_hub
 hf download Qwen/Qwen3-4B --local-dir "$MODEL_PATH"
 ```
 
-Use existing local model weights if already downloaded. Set `MEGATRON_BRIDGE_SRC` to your Bridge source directory; the launcher initializes MindSpeed compatibility patches before importing it.
+If the model is already downloaded, set `MODEL_PATH` to its directory. The launcher automatically detects Megatron-Bridge in the standard locations and initializes MindSpeed compatibility before importing it.
 
 ## Data preparation
 
 The helper downloads a task from the `filtered` split of `nebius/SWE-rebench` and converts it into Uni-Agent's Parquet format.
 
 ```bash
-export TRAIN_FILE=/workspace/data/swe_rebench.parquet
+export TRAIN_FILE=/workspace/tpr-workspace/data/swe_rebench.parquet
+mkdir -p /workspace/tpr-workspace/data
 python "$RECIPE_ROOT/tpr/prepare_swe_rebench.py" --output "$TRAIN_FILE"
 
 docker pull --platform linux/amd64 \
   swerebench/sweb.eval.x86_64.aspp_1776_pelita-875:latest
-export TASK_CONFIG="$RECIPE_ROOT/tpr/task_config_swe_rebench_docker.yaml"
 ```
 
-Use `--instance-id` to select a different task and provide its corresponding Docker image.
+Use `--instance-id` to select another task and make its corresponding Docker image available. The default task configuration is included in this recipe.
 
 ## Training
 
@@ -84,6 +87,3 @@ The launcher runs one training step by default. Set `TOTAL_TRAINING_STEPS` for l
 | `MAX_PROMPT_LENGTH`, `MAX_RESPONSE_LENGTH` | `18432`, `2048` | Sequence lengths |
 | `ACTOR_RECOMPUTE` | `True` | Activation recomputation |
 | `TOTAL_TRAINING_STEPS` | `1` | Training steps |
-| `TASK_CONFIG` | Bundled YAML | Sandbox and agent settings |
-
-Keep `TRAIN_SP=False` when TP and CP are both greater than 1. For restricted-network deployments, provide the model, dataset and a Claude Code-enabled Docker image locally, and configure the image mapping in `TASK_CONFIG`.
