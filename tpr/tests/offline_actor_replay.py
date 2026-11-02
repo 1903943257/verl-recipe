@@ -49,42 +49,40 @@ class _PPO:
         return getattr(self, key, default)
 
 
-class _RingCPOnlyCoreAttention:
-    """Construction sentinel; all active attention must go through Recipe Ring."""
+def _make_ring_cp_only_core_attention():
+    """Build a Megatron module class after MindSpeed has patched the runtime."""
+    from megatron.core.transformer.module import MegatronModule
 
-    def __new__(cls, *args, **kwargs):
-        from megatron.core.transformer.module import MegatronModule
+    class RingCPOnlyCoreAttention(MegatronModule):
+        def __init__(
+            self,
+            config,
+            layer_number,
+            attn_mask_type,
+            attention_type,
+            attention_dropout=None,
+            softmax_scale=None,
+            cp_comm_type=None,
+            pg_collection=None,
+        ):
+            super().__init__(config=config)
+            if getattr(config, "apply_query_key_layer_scaling", False):
+                raise NotImplementedError("QK layer scaling is outside this replay")
+            self.layer_number = max(1, layer_number)
+            self.attn_mask_type = attn_mask_type
+            self.attention_type = attention_type
+            self.softmax_scale = (
+                1.0 / math.sqrt(config.kv_channels)
+                if softmax_scale is None
+                else float(softmax_scale)
+            )
 
-        class _Impl(MegatronModule):
-            def __init__(
-                self,
-                config,
-                layer_number,
-                attn_mask_type,
-                attention_type,
-                attention_dropout=None,
-                softmax_scale=None,
-                cp_comm_type=None,
-                pg_collection=None,
-            ):
-                super().__init__(config=config)
-                if getattr(config, "apply_query_key_layer_scaling", False):
-                    raise NotImplementedError("QK layer scaling is outside this replay")
-                self.layer_number = max(1, layer_number)
-                self.attn_mask_type = attn_mask_type
-                self.attention_type = attention_type
-                self.softmax_scale = (
-                    1.0 / math.sqrt(config.kv_channels)
-                    if softmax_scale is None
-                    else float(softmax_scale)
-                )
+        def forward(self, *args, **kwargs):
+            raise RuntimeError(
+                "TPR replay reached the square core attention; expected Recipe Ring CP"
+            )
 
-            def forward(self, *args, **kwargs):
-                raise RuntimeError(
-                    "TPR replay reached the square core attention; expected Recipe Ring CP"
-                )
-
-        return _Impl(*args, **kwargs)
+    return RingCPOnlyCoreAttention
 
 
 def _sanitize_mindspeed_args(args: Any) -> None:
@@ -357,8 +355,9 @@ def _build_model(runtime, model_path: Path):
     )
     spec = get_gpt_decoder_block_spec(config, use_transformer_engine=False, pp_rank=0)
     spec = replace_self_attention_with_tpr(spec)
+    ring_core_attention = _make_ring_cp_only_core_attention()
     for layer_spec in _get_layer_specs(spec):
-        layer_spec.submodules.self_attention.submodules.core_attention = _RingCPOnlyCoreAttention
+        layer_spec.submodules.self_attention.submodules.core_attention = ring_core_attention
 
     pg = SimpleNamespace(
         tp=runtime.tp_group,
@@ -467,9 +466,11 @@ def _load_capture(path: Path, rows: tuple[int, ...], mode: str):
 def _sample_tensor(value: torch.Tensor):
     flat = value.detach().reshape(-1)
     count = min(32, flat.numel())
-    indices = torch.linspace(
-        0, max(flat.numel() - 1, 0), steps=count, device=flat.device
-    ).long()
+    if count == 1:
+        index_values = [0]
+    else:
+        index_values = [index * (flat.numel() - 1) // (count - 1) for index in range(count)]
+    indices = torch.tensor(index_values, dtype=torch.long, device=flat.device)
     return {
         "shape": tuple(value.shape),
         "indices": indices.cpu(),
@@ -512,7 +513,7 @@ def _metric_value(metrics, name):
 def _run_mode(mode: str, args):
     runtime = _initialize_runtime()
     from verl.workers.utils.losses import ppo_loss
-    from verl_tpr.adapter import run_tpr_forward_backward_batch
+    from verl_tpr.adapter import _trajectory_keys_from_minibatch, run_tpr_forward_backward_batch
     from verl_tpr.tree import build_tree_execution_plans
 
     model_path = Path(args.model).resolve()
@@ -522,9 +523,7 @@ def _run_mode(mode: str, args):
     rows = tuple(int(value) for value in args.rows.split(","))
     batch, original_keys, token_count, data_sha = _load_capture(capture_path, rows, mode)
     forest = build_tree_execution_plans(
-        tuple(batch["tpr_trajectory_keys"].tolist())
-        if hasattr(batch["tpr_trajectory_keys"], "tolist")
-        else tuple(batch["tpr_trajectory_keys"]),
+        _trajectory_keys_from_minibatch(batch),
         batch,
         tree_policy="qwen_turn",
         turn_min_segment_tokens=args.turn_min_segment_tokens,
