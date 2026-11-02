@@ -14,8 +14,6 @@
     name: claude_code
     max_turns: 100
     run_timeout: 3600
-    extra_env:
-      DISABLE_AUTO_COMPACT: "1"
   prompt_template:
     - role: user
       content: |-

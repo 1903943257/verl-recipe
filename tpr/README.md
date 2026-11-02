@@ -2,6 +2,10 @@
 
 TPR reuses shared prefixes across agent trajectories during VERL Megatron Actor training. See [RFC #7561](https://github.com/verl-project/verl/issues/7561).
 
+## Required `verl` version
+
+This recipe is pinned to upstream `verl` commit [`2ab35292039a51175a4b3d3b3b2d76e951a0d3e4`](https://github.com/verl-project/verl/commit/2ab35292039a51175a4b3d3b3b2d76e951a0d3e4). The integration patch is specific to this source revision; see [`REQUIRED_VERL.txt`](REQUIRED_VERL.txt) for the canonical pin and installation command.
+
 ## Overview
 
 - **Model:** [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)
@@ -29,13 +33,13 @@ git clone https://github.com/verl-project/verl.git
 git clone https://github.com/verl-project/verl-recipe.git
 git clone https://github.com/verl-project/uni-agent.git
 
-VERL_COMMIT=$(sed -n 's/^VERL_COMMIT=//p' verl-recipe/tpr/REQUIRED_VERL.txt)
+VERL_COMMIT=$(sed -n 's/^COMMIT=//p' verl-recipe/tpr/REQUIRED_VERL.txt)
 git -C verl checkout "$VERL_COMMIT"
 git -C verl apply --check ../verl-recipe/tpr/verl-tpr.patch
 git -C verl apply ../verl-recipe/tpr/verl-tpr.patch
 ```
 
-Apply the patch once to a clean VERL checkout. See [REQUIRED_VERL.txt](REQUIRED_VERL.txt) for the pinned version.
+Apply the patch once to a clean VERL checkout; do not apply it twice.
 
 Inside the **training container**:
 
