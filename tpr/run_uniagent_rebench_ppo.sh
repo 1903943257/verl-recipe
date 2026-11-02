@@ -58,7 +58,6 @@ TRAIN_PP="${TRAIN_PP:-1}"
 TRAIN_CP="${TRAIN_CP:-4}"
 TRAIN_SP="$(normalize_bool "${TRAIN_SP:-False}")"
 TPR_ENABLED="$(normalize_bool "${TPR_ENABLED:-True}")"
-ACTOR_RECOMPUTE="$(normalize_bool "${ACTOR_RECOMPUTE:-True}")"
 
 WORLD_SIZE=$((NNODES * N_GPUS_PER_NODE))
 PARALLEL_PRODUCT=$((TRAIN_TP * TRAIN_PP * TRAIN_CP))
@@ -173,15 +172,6 @@ from verl.models.mcore.bridge import AutoBridge
 print(f"Megatron-Bridge import OK after MindSpeed patches: {AutoBridge}")
 PY
 
-RECOMPUTE_ARGS=()
-if [[ "${ACTOR_RECOMPUTE}" == "True" ]]; then
-  RECOMPUTE_ARGS=(
-    "++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full"
-    "++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform"
-    "++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers=1"
-  )
-fi
-
 cd "${VERL_ROOT}"
 python -m verl.trainer.main_ppo \
   --config-name=ppo_megatron_trainer \
@@ -236,7 +226,6 @@ python -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.megatron.sequence_parallel="${TRAIN_SP}" \
   ++actor_rollout_ref.actor.megatron.override_transformer_config.sequence_parallel="${TRAIN_SP}" \
   actor_rollout_ref.actor.megatron.use_remove_padding=True \
-  "${RECOMPUTE_ARGS[@]}" \
   +actor_rollout_ref.actor.megatron.tpr_enabled="${TPR_ENABLED}" \
   algorithm.rollout_correction.bypass_mode=True \
   algorithm.rollout_correction.loss_type=ppo_clip \
@@ -288,4 +277,5 @@ python -m verl.trainer.main_ppo \
   trainer.total_epochs="${TOTAL_EPOCHS}" \
   trainer.total_training_steps="${TOTAL_TRAINING_STEPS}" \
   trainer.default_local_dir="${CKPTS_DIR}" \
-  skip.rollout_tq.enable=False
+  skip.rollout_tq.enable=False \
+  "$@"
