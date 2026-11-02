@@ -210,8 +210,6 @@ python -m verl.trainer.main_ppo \
   +actor_rollout_ref.actor.optim.override_optimizer_config.overlap_cpu_optimizer_d2h_h2d=True \
   actor_rollout_ref.actor.use_kl_loss=False \
   actor_rollout_ref.actor.entropy_coeff=0 \
-  actor_rollout_ref.actor.loss_agg_mode=token-mean \
-  actor_rollout_ref.actor.policy_loss.loss_mode=vanilla \
   actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE}" \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
   actor_rollout_ref.actor.ppo_max_token_len_per_gpu="${MAX_MODEL_LEN}" \
