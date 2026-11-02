@@ -68,11 +68,11 @@ if (( PARALLEL_PRODUCT <= 0 || WORLD_SIZE % PARALLEL_PRODUCT != 0 )); then
 fi
 TRAIN_DP=$((WORLD_SIZE / PARALLEL_PRODUCT))
 
-# This draft matches the currently packaged runtime. The experimental SP+RingCP
-# support from the active development branch will be synchronized after final tests.
+# Native sequence parallelism is currently supported with CP=1 only.
+# The combined TP+SP+RingCP path must be enabled only after its full training
+# correctness and gradient-parity checks are integrated.
 if [[ "${TPR_ENABLED}" == "True" && "${TRAIN_TP}" -gt 1 && "${TRAIN_CP}" -gt 1 && "${TRAIN_SP}" == "True" ]]; then
-  echo "ERROR: current Recipe runtime requires TRAIN_SP=False for TP>1 and CP>1." >&2
-  echo "Use TRAIN_SP=False, or update the Recipe runtime after the SP+RingCP experiment is finalized." >&2
+  echo "ERROR: TPR currently requires TRAIN_SP=False when TP>1 and CP>1." >&2
   exit 2
 fi
 
