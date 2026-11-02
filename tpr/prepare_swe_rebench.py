@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare one task from the public SWE-ReBench filtered split for a Uni-Agent PPO smoke test."""
+"""Prepare SWE-ReBench task data for Uni-Agent training."""
 
 from __future__ import annotations
 
