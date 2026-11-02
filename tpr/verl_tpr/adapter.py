@@ -182,15 +182,6 @@ def _validate_tpr_parallel_sizes(sizes: dict[str, int]) -> int:
     return tp
 
 
-def _validate_tpr_cp_combination(tp_size: int, cp_runtime: Any, config: Any) -> None:
-    if cp_runtime.size <= 1:
-        return
-    if tp_size > 1 and getattr(config, "sequence_parallel", False):
-        raise NotImplementedError(
-            "TP>1 with CP>1 requires sequence_parallel=False; combined TP+SP+CP has not been validated"
-        )
-
-
 def _trajectory_keys_from_minibatch(data: Any) -> tuple[str, ...]:
     """Resolve stable per-row identities WITHOUT asking the VERL Trainer to build a plan.
 
@@ -257,8 +248,8 @@ def run_tpr_forward_backward_batch(
     this function BEFORE prepare_micro_batches, so shared trajectories remain
     in the same logical mini-batch. TP/CP/DP sizes are taken from native
     Megatron groups; DP replicas build independent forests and use native
-    gradient finalization. CP>1 uses Ring. TP>1 with CP>1 requires SP=False;
-    TP>1 with CP=1 may use native SP subject to segment divisibility.
+    gradient finalization. CP>1 uses Ring. SP is passed through to
+    native Megatron and can be combined with TP+CP.
     The current executor requires PP=EP=VPP=1 and a dense causal model.
     Vanilla token-mean PPO; no native /M schedule scaling is applied because
     SegmentExecutor performs autograd itself.
@@ -351,7 +342,6 @@ def run_tpr_forward_backward_batch(
         assert_tp_plan_agreement(digest_forest_plan(forest), tp_size=tp_size, cp_size=sizes["CP"])
     record_stage("tp_plan_collective_ms", tp_check_start)
     cp_runtime = resolve_engine_cp_runtime(engine)
-    _validate_tpr_cp_combination(tp_size, cp_runtime, config)
     # Reject unsupported physical shapes for the whole forest before any
     # forward/backward can leave the mini-batch with partial gradients.
     for tree_plan in forest.trees:
