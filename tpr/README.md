@@ -19,12 +19,10 @@ The training container must access a Docker daemon for `linux/amd64` SWE-ReBench
 
 ## Installation
 
-**On the host:** work from a directory mounted as `/workspace` inside the training container.
+**On the host:** place this `verl-recipe` checkout in a directory mounted as `/workspace` inside the training container. Run the following commands from its parent directory:
 
 ```bash
 git clone https://github.com/verl-project/verl.git
-git clone -b fix/tpr-pr165-precommit-20261029 \
-  https://github.com/1903943257/verl-recipe.git
 git clone https://github.com/verl-project/uni-agent.git
 
 VERL_COMMIT=$(sed -n 's/^VERL_COMMIT=//p' verl-recipe/tpr/REQUIRED_VERL.txt)
