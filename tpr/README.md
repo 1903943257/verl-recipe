@@ -96,6 +96,5 @@ When `tpr_enabled=True` and `recompute_granularity` is configured, the Recipe in
 | `TRAIN_TP`, `TRAIN_PP`, `TRAIN_CP`, `TRAIN_SP` | `2`, `1`, `4`, `False` | Actor parallelism; DP is derived from the total NPU count |
 | `N`, `CONCURRENCY` | `8`, `8` | Trajectories and concurrent sessions |
 | `MAX_PROMPT_LENGTH`, `MAX_RESPONSE_LENGTH` | `18432`, `2048` | Sequence lengths |
-
 | `TPR_ENABLED` | `True` | Enable the TPR execution path |
 | `TOTAL_TRAINING_STEPS` | `1` | Training steps |
