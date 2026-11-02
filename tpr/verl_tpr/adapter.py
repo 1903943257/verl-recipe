@@ -322,7 +322,7 @@ def run_tpr_forward_backward_batch(
         if detailed_profile:
             stage_ms[name] = stage_ms.get(name, 0.0) + (time.perf_counter() - start) * 1000
 
-    tree_policy = os.getenv("TPR_TREE_POLICY", "qwen_turn")
+    tree_policy = os.getenv("TPR_TREE_POLICY", "token_lcp")
     try:
         turn_min_tokens = int(os.getenv("TPR_TURN_MIN_SEGMENT_TOKENS", "128"))
     except ValueError as exc:
