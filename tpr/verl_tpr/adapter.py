@@ -186,7 +186,9 @@ def _validate_tpr_cp_combination(tp_size: int, cp_runtime: Any, config: Any) -> 
     if cp_runtime.size <= 1:
         return
     if tp_size > 1 and getattr(config, "sequence_parallel", False):
-        raise NotImplementedError("TP>1 with CP>1 requires sequence_parallel=False; combined TP+SP+CP has not been validated")
+        raise NotImplementedError(
+            "TP>1 with CP>1 requires sequence_parallel=False; combined TP+SP+CP has not been validated"
+        )
 
 
 def _trajectory_keys_from_minibatch(data: Any) -> tuple[str, ...]:
