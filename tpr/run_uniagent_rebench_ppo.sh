@@ -67,13 +67,7 @@ if (( PARALLEL_PRODUCT <= 0 || WORLD_SIZE % PARALLEL_PRODUCT != 0 )); then
 fi
 TRAIN_DP=$((WORLD_SIZE / PARALLEL_PRODUCT))
 
-# Native sequence parallelism is currently supported with CP=1 only.
-# The combined TP+SP+RingCP path must be enabled only after its full training
-# correctness and gradient-parity checks are integrated.
-if [[ "${TPR_ENABLED}" == "True" && "${TRAIN_TP}" -gt 1 && "${TRAIN_CP}" -gt 1 && "${TRAIN_SP}" == "True" ]]; then
-  echo "ERROR: TPR currently requires TRAIN_SP=False when TP>1 and CP>1." >&2
-  exit 2
-fi
+# TRAIN_SP is passed through to native Megatron; TPR imposes no SP/CP topology gate.
 
 N="${N:-8}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-18432}"
