@@ -157,19 +157,20 @@ def install_tpr_module_spec(provider: Any, *, bridge: Any | None = None) -> None
     provider.transformer_layer_spec = make_tpr_module_spec_provider(provider.transformer_layer_spec)
 
 
-def _validate_tpr_parallel_sizes(sizes: dict[str, int], *, ppo: bool) -> int:
-    """Validate structural parallelism requirements without a TP/CP/DP whitelist.
+def _validate_tpr_parallel_sizes(sizes: dict[str, int]) -> int:
+    """Validate structural requirements, not a fixed TP/CP/DP topology matrix.
 
     TP and CP process groups are provided by Megatron; CP>1 uses the Ring
     backend. DP replicas own independent TPR forests and rely on native VERL
-    dispatch, PPO normalization, and Megatron gradient finalization. Therefore
-    valid positive TP/CP/DP sizes are not restricted to a tested topology list.
+    dispatch, PPO normalization, and Megatron gradient finalization. Any
+    positive TP/CP/DP sizes are accepted when Megatron can construct the
+    topology and the model satisfies its native divisibility constraints.
 
     Pipeline and expert parallel execution are different: the current TPR
     executor runs one complete dense model chunk and has no stage-/expert-aware
     KV or autograd transport, so PP and EP must remain one.
     """
-    tp, cp, dp = (sizes[name] for name in ("TP", "CP", "DP"))
+    tp = sizes["TP"]
     for name, value in (("TP", tp), ("CP", cp), ("DP", dp), ("PP", sizes["PP"]), ("EP", sizes["EP"])):
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise ValueError(f"{name} parallel size must be a positive integer, got {value!r}")
@@ -279,7 +280,7 @@ def run_tpr_forward_backward_batch(
         "CP": engine.engine_config.context_parallel_size,
         "DP": engine.get_data_parallel_size(),
     }
-    tp_size = _validate_tpr_parallel_sizes(sizes, ppo=True)
+    tp_size = _validate_tpr_parallel_sizes(sizes)
     if engine.engine_config.virtual_pipeline_model_parallel_size not in (None, 1):
         raise NotImplementedError("TPR PPO does not support virtual PP")
     if engine.model_config.mtp.enable or engine.enable_routing_replay:
