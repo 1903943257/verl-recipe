@@ -78,6 +78,17 @@ bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
 
 The launcher runs one training step by default. Set `TOTAL_TRAINING_STEPS` for longer training, or `TPR_ENABLED=False` for the original Full path. Logs are saved under `$VERL_ROOT/outputs/tpr/`.
 
+TPR has no separate recompute switch. To enable the supported native Megatron recompute mode, pass the ordinary transformer-config overrides to the launcher:
+
+```bash
+bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh" \
+  ++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
+  ++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full \
+  ++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers=1
+```
+
+When `tpr_enabled=True` and `recompute_granularity` is configured, the Recipe installs the TPR-aware recompute adapter automatically. The currently implemented mode is `full/uniform/1`; unsupported recompute configurations fail validation rather than silently falling back.
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -85,6 +96,6 @@ The launcher runs one training step by default. Set `TOTAL_TRAINING_STEPS` for l
 | `TRAIN_TP`, `TRAIN_PP`, `TRAIN_CP`, `TRAIN_SP` | `2`, `1`, `4`, `False` | Actor parallelism; DP is derived from the total NPU count |
 | `N`, `CONCURRENCY` | `8`, `8` | Trajectories and concurrent sessions |
 | `MAX_PROMPT_LENGTH`, `MAX_RESPONSE_LENGTH` | `18432`, `2048` | Sequence lengths |
-| `ACTOR_RECOMPUTE` | `True` | Enable full/uniform/1 activation recomputation |
+
 | `TPR_ENABLED` | `True` | Enable the TPR execution path |
 | `TOTAL_TRAINING_STEPS` | `1` | Training steps |
