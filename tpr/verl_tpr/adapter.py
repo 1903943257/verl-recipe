@@ -322,18 +322,8 @@ def run_tpr_forward_backward_batch(
         if detailed_profile:
             stage_ms[name] = stage_ms.get(name, 0.0) + (time.perf_counter() - start) * 1000
 
-    tree_policy = os.getenv("TPR_TREE_POLICY", "token_lcp")
-    try:
-        turn_min_tokens = int(os.getenv("TPR_TURN_MIN_SEGMENT_TOKENS", "128"))
-    except ValueError as exc:
-        raise ValueError("TPR_TURN_MIN_SEGMENT_TOKENS must be a positive integer") from exc
     keys = _trajectory_keys_from_minibatch(data)
-    forest = build_tree_execution_plans(
-        keys,
-        data,
-        tree_policy=tree_policy,
-        turn_min_segment_tokens=turn_min_tokens,
-    )
+    forest = build_tree_execution_plans(keys, data)
     if not forest.trees or not forest.logical_loss_tokens:
         raise ValueError("TPR PPO mini-batch has no supervised response tokens")
     record_stage("tree_build_cpu_ms", profile_origin)
