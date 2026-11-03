@@ -75,30 +75,22 @@ Use `--instance-id` to select another task and make its corresponding Docker ima
 ## Training
 
 ```bash
-export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export TPR_ENABLED=True
 bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
 ```
 
-The launcher runs one training step by default. Set `TOTAL_TRAINING_STEPS` for longer training, or `TPR_ENABLED=False` for the original Full path. Logs are saved under `$VERL_ROOT/outputs/tpr/`.
-
-TPR has no separate recompute switch. To enable the supported native Megatron recompute mode, pass the ordinary transformer-config overrides to the launcher:
-
-```bash
-bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh" \
-  ++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
-  ++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full \
-  ++actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers=1
-```
-
-When `tpr_enabled=True` and `recompute_granularity` is configured, the Recipe installs the TPR-aware recompute adapter automatically. The currently implemented mode is `full/uniform/1`; unsupported recompute configurations fail validation rather than silently falling back.
+The launcher runs 10 training steps by default. Set `TOTAL_TRAINING_STEPS` to change the run length, or set `TPR_ENABLED=False` to use the original Full path. Logs are saved under `$VERL_ROOT/outputs/tpr/`.
 
 ## Configuration
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `TRAIN_TP`, `TRAIN_PP`, `TRAIN_CP`, `TRAIN_SP` | `2`, `1`, `4`, `False` | Actor parallelism; DP is derived from the total NPU count |
-| `N`, `CONCURRENCY` | `8`, `8` | Trajectories and concurrent sessions |
-| `MAX_PROMPT_LENGTH`, `MAX_RESPONSE_LENGTH` | `18432`, `2048` | Sequence lengths |
-| `TPR_ENABLED` | `True` | Enable the TPR execution path |
-| `TOTAL_TRAINING_STEPS` | `1` | Training steps |
+The launcher exposes the following commonly adjusted settings. Data parallelism (DP) is calculated automatically from the total NPU count.
+
+| Setting | Default | Description |
+| --- | ---: | --- |
+| `NNODES` / `N_GPUS_PER_NODE` | `1` / `8` | Number of nodes and NPUs per node |
+| `TRAIN_TP` / `TRAIN_CP` | `2` / `4` | Actor tensor and context parallel sizes |
+| DP | Automatic | Derived from the total NPU count, TP, and CP |
+| `N` / `CONCURRENCY` | `8` / `8` | Trajectories per prompt and concurrent agent sessions |
+| `MAX_PROMPT_LENGTH` / `MAX_RESPONSE_LENGTH` | `18432` / `2048` | Maximum prompt and response lengths |
+| `TPR_ENABLED` | `True` | Enable TPR; set to `False` to use the original Full path |
+| `TOTAL_TRAINING_STEPS` | `10` | Number of training steps |
