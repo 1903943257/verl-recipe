@@ -162,7 +162,6 @@ def _validate_length(name: str, value: int, *, allow_zero: bool) -> None:
         raise ValueError(f"{name} must be a {qualifier} integer, got {value!r}")
 
 
-
 @dataclass(frozen=True, slots=True)
 class PreparedReplayModel:
     """Batch-scoped static model facts and live stochastic-setting references.

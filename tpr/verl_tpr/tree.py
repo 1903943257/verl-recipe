@@ -414,6 +414,7 @@ def assert_tp_plan_agreement(digest: str, *, tp_size: int, cp_size: int = 1) -> 
     device = torch.device("cpu")
     if dist.get_backend(group) != "gloo":
         from verl.utils.device import get_device_id, get_device_name
+
         device = torch.device(get_device_name(), get_device_id())
     local = torch.tensor(words, dtype=torch.int64, device=device)
     signatures = [torch.empty_like(local) for _ in range(size)]
