@@ -54,14 +54,15 @@ def _validate_inputs(query: Tensor, key: Tensor, value: Tensor, dropout_p: float
         if tensor.ndim != 4:
             raise ValueError(f"{name} must have shape [sequence, batch, heads, head_dim], got {tensor.shape}")
 
-    query_length, batch_size, query_heads, head_dim = query.shape
+    query_length, query_batch_size, query_heads, head_dim = query.shape
     kv_length, key_batch_size, key_heads, key_head_dim = key.shape
 
     if value.shape != key.shape:
         raise ValueError(f"key and value must have identical shapes, got key={key.shape}, value={value.shape}")
-    if batch_size < 1 or key_batch_size != batch_size:
+    if query_batch_size != 1 or key_batch_size != 1:
         raise ValueError(
-            f"rectangular attention requires matching positive batch sizes, got Q={batch_size}, KV={key_batch_size}"
+            "rectangular attention requires batch size 1, "
+            f"got Q={query_batch_size}, KV={key_batch_size}"
         )
     if query_length <= 0 or kv_length <= 0:
         raise ValueError(f"sequence lengths must be positive, got Q={query_length}, KV={kv_length}")
@@ -132,9 +133,9 @@ def rectangular_causal_attention(
     """Run differentiable rectangular causal attention on equal-length NPU sequences.
 
     Args:
-        query: Post-RoPE query in Megatron layout ``[Sq, B, Hq, D]``.
+        query: Post-RoPE query in Megatron layout ``[Sq, 1, Hq, D]``.
         key: Post-RoPE key, including the external prefix, in layout
-            ``[Skv, B, Hkv, D]``.
+            ``[Skv, 1, Hkv, D]``.
         value: Value, including the external prefix, with the same shape as
             ``key``.
         softmax_scale: Attention score scale. Defaults to ``1 / sqrt(D)``.
@@ -147,7 +148,7 @@ def rectangular_causal_attention(
             mask mode instead of the compressed right-down causal mask.
 
     Returns:
-        Attention context in Megatron layout ``[Sq, B, Hq * D]``.
+        Attention context in Megatron layout ``[Sq, 1, Hq * D]``.
     """
 
     query_length, kv_length, query_heads, head_dim = _validate_inputs(query, key, value, dropout_p)
@@ -172,18 +173,9 @@ def rectangular_causal_attention(
     except ImportError as exc:  # pragma: no cover - only reachable in a misconfigured NPU runtime
         raise RuntimeError("torch_npu is required for rectangular_causal_attention") from exc
 
-    batch_size = query.shape[1]
-    if batch_size > 1 and attention_mask is not None:
-        raise NotImplementedError("grouped rectangular attention only supports right-down causal mode")
-    if batch_size == 1:
-        query_tnd = query.squeeze(1).contiguous()
-        key_tnd = key.squeeze(1).contiguous()
-        value_tnd = value.squeeze(1).contiguous()
-    else:
-        # Sequence-major Megatron [S, B, H, D] -> per-leaf TND.
-        query_tnd = query.permute(1, 0, 2, 3).reshape(-1, query_heads, head_dim).contiguous()
-        key_tnd = key.permute(1, 0, 2, 3).reshape(-1, key.shape[2], head_dim).contiguous()
-        value_tnd = value.permute(1, 0, 2, 3).reshape(-1, value.shape[2], head_dim).contiguous()
+    query_tnd = query.squeeze(1).contiguous()
+    key_tnd = key.squeeze(1).contiguous()
+    value_tnd = value.squeeze(1).contiguous()
     attention_mask, sparse_mode, next_tokens = _attention_mask_parameters(
         attention_mask,
         device=query.device,
@@ -204,13 +196,11 @@ def rectangular_causal_attention(
         keep_prob=1.0,
         inner_precise=inner_precise,
         sparse_mode=sparse_mode,
-        actual_seq_qlen=[query_length * (i + 1) for i in range(batch_size)],
-        actual_seq_kvlen=[kv_length * (i + 1) for i in range(batch_size)],
+        actual_seq_qlen=[query_length],
+        actual_seq_kvlen=[kv_length],
     )[0]
 
-    expected_shape = (query_length * batch_size, query_heads, head_dim)
+    expected_shape = (query_length, query_heads, head_dim)
     if output.shape != expected_shape:
         raise RuntimeError(f"unexpected CANN attention output shape: expected {expected_shape}, got {output.shape}")
-    if batch_size == 1:
-        return output.reshape(query_length, 1, query_heads * head_dim)
-    return output.reshape(batch_size, query_length, query_heads * head_dim).transpose(0, 1).contiguous()
+    return output.reshape(query_length, 1, query_heads * head_dim)
