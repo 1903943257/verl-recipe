@@ -83,7 +83,7 @@ def _assert_objective_mapping(
 
 
 def test_shared_prefix_at_threshold_builds_one_tree_across_uids() -> None:
-    prefix = list(range(10_000, 10_000 + 1100))
+    prefix = list(range(10_000, 10_000 + MIN_SHARED))
     suffix_a = list(range(90_000, 90_024))
     suffix_b = list(range(80_000, 80_024))
     rows = [prefix + suffix_a, prefix + suffix_b]
