@@ -675,7 +675,7 @@ def _token_lcp_clusters(
     for cluster in clusters:
         cuts = {
             shared
-            for left, right in zip(cluster, cluster[1:])
+            for left, right in zip(cluster, cluster[1:], strict=False)
             if (shared := _token_lcp_length(left[1], right[1])) > 0
         }
         cuts.update(
