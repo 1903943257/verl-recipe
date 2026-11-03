@@ -19,7 +19,6 @@ from __future__ import annotations
 import copy
 import inspect
 import os
-import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import replace
@@ -37,7 +36,7 @@ from verl.utils.megatron_utils import unwrap_model
 from verl.utils.metric import AggregationType, Metric
 from verl_tpr.attention import TPRSelfAttention
 
-from .executor import SegmentEventProfiler, SegmentExecutor, prepare_replay_model, validate_replay_plan
+from .executor import SegmentExecutor, prepare_replay_model, validate_replay_plan
 from .ring import aggregate_cp_loss, resolve_engine_cp_runtime
 from .tree import ForestExecutionPlan, TreeExecutionPlan, assert_tp_plan_agreement, digest_forest_plan
 
@@ -314,23 +313,12 @@ def run_tpr_forward_backward_batch(
             f"actual dp_size={sizes['DP']} before TPR routing"
         )
 
-    detailed_profile = os.getenv("TPR_EXEC_PROFILE", "0") == "1"
-    stage_ms = {}
-    profile_origin = time.perf_counter()
-
-    def record_stage(name, start):
-        if detailed_profile:
-            stage_ms[name] = stage_ms.get(name, 0.0) + (time.perf_counter() - start) * 1000
-
     keys = _trajectory_keys_from_minibatch(data)
     forest = build_tree_execution_plans(keys, data)
     if not forest.trees or not forest.logical_loss_tokens:
         raise ValueError("TPR PPO mini-batch has no supervised response tokens")
-    record_stage("tree_build_cpu_ms", profile_origin)
-    tp_check_start = time.perf_counter()
     if tp_size * sizes["CP"] > 1:
         assert_tp_plan_agreement(digest_forest_plan(forest), tp_size=tp_size, cp_size=sizes["CP"])
-    record_stage("tp_plan_collective_ms", tp_check_start)
     cp_runtime = resolve_engine_cp_runtime(engine)
     # Reject unsupported physical shapes for the whole forest before any
     # forward/backward can leave the mini-batch with partial gradients.
@@ -370,12 +358,7 @@ def run_tpr_forward_backward_batch(
         raise RuntimeError("TPR PPO requires native finalize_model_grads_func")
 
     metrics = _PPOMetrics()
-    event_profiler = SegmentEventProfiler() if detailed_profile else None
-    tree_number = 0
-
     def run_one_tree(tree_plan):
-        nonlocal tree_number
-        setup_start = time.perf_counter() if detailed_profile else None
         shard_for_segment = (
             None if cp_runtime.ring is None else lambda segment: cp_runtime.ring.make_sequence_shard(segment.length)
         )
@@ -392,25 +375,19 @@ def run_tpr_forward_backward_batch(
             cp_group=cp_runtime.group,
             ring_runtime=cp_runtime.ring,
         )
-        record_stage("executor_setup_cpu_ms", setup_start)
-        loss = executor.run(event_profiler=event_profiler, tree_index=tree_number)
-        tree_number += 1
-        metrics_start = time.perf_counter() if detailed_profile else None
+        loss = executor.run()
         _assert_finite_tree_loss(loss, tp_size=tp_size, cp_size=cp_runtime.size)
         for segment_id, segment_metrics in executor.segment_loss_metrics:
             token_weight = counts[segment_id] / forest.logical_loss_tokens
             metrics.add(segment_metrics, token_weight)
-        record_stage("segment_metrics_cpu_ms", metrics_start)
         return loss
 
-    run_start = time.perf_counter() if detailed_profile else None
     loss = run_forest(
         forest,
         run_one_tree,
         lambda: finalize(engine.module, None, force_all_reduce=True),
         no_sync_func,
     )
-    record_stage("tree_run_and_finalize_host_ms", run_start)
     if not bool(torch.isfinite(loss).item()):
         raise FloatingPointError("non-finite TPR PPO mini-batch loss")
     if objective.capture_log_probs:
@@ -429,13 +406,6 @@ def run_tpr_forward_backward_batch(
     # same additive objective to both legacy reduction slots.
     _, global_normalized_loss = aggregate_cp_loss(loss, loss, cp_runtime)
     loss = float(global_normalized_loss.item())
-    if detailed_profile:
-        record_stage("whole_entry_host_ms", profile_origin)
-        # NPU events must only be materialized after caller's one final NPU sync.
-        engine._tpr_segment_event_profiler = event_profiler
-        engine._tpr_stage_profile = stage_ms
-        engine._tpr_segment_peak_allocated_bytes = event_profiler.max_allocated_bytes
-        engine._tpr_segment_peak_reserved_bytes = event_profiler.max_reserved_bytes
     diagnostics = {
         "tpr/forest_trees": len(forest.trees),
         "tpr/physical_segments": forest.segment_count,

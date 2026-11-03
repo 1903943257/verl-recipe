@@ -12,15 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public TPR Ring CP execution primitives; see ring_layout/ring_attention.
-
-The public and diagnostic import names remain available here. For profiling or
-monkeypatching, instrument the *owning* implementation module.
-"""
+"""Public TPR Ring CP execution primitives; see ring_layout/ring_attention."""
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -30,7 +25,7 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
-# Keep the historical diagnostic and CP1 SBH import surface available.
+# Expose the custom autograd implementation to internal callers.
 from .ring_attention import (
     _RingTPRAttention,
 )
@@ -59,7 +54,6 @@ def ring_cp_attention(
     cp_group: Any,
     softmax_scale: float | None = None,
     _layout: _RingStaticLayout | None = None,
-    _trace_layer: int | None = None,
 ) -> Tensor:
     """Run blockwise TPR attention over MindSpeed causal Ring shards."""
 
@@ -72,7 +66,6 @@ def ring_cp_attention(
         cp_group=cp_group,
         softmax_scale=softmax_scale,
         _layout=_layout,
-        _trace_layer=_trace_layer,
     )
     flat_kv = []
     for block in blocks:
@@ -123,7 +116,6 @@ class RingCPAttentionBackend:
         self._prefix_blocks_by_layer = MappingProxyType(normalized)
         self._cp_group = cp_group
         self._parallel_size = layout.cp_size
-        self._first_layer = min(normalized)
 
     @property
     def global_prefix_length(self) -> int:
@@ -163,11 +155,6 @@ class RingCPAttentionBackend:
             cp_group=self._cp_group,
             softmax_scale=softmax_scale,
             _layout=self._ring_layout,
-            _trace_layer=(
-                layer_number
-                if os.getenv("TPR_RING_BLOCK_STATS", "0") == "1" and layer_number == self._first_layer
-                else None
-            ),
         )
 
 

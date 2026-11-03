@@ -251,7 +251,6 @@ class _RingAttentionConfig:
     coalesce_prefix_full: bool = False
     coalesce_prefix_query: bool = False
     coalesce_prefix_padded: bool = False
-    trace_layer: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,7 +469,6 @@ def _normalize_inputs(
     cp_group: Any,
     softmax_scale: float | None,
     _layout: _RingStaticLayout | None = None,
-    _trace_layer: int | None = None,
 ) -> tuple[tuple[RingLocalKVBlock, ...], _RingAttentionConfig]:
     if _layout is None:
         cp_size, cp_rank = _group_world_size_and_rank(cp_group)
@@ -546,6 +544,5 @@ def _normalize_inputs(
         coalesce_prefix_full=coalesce_full,
         coalesce_prefix_query=coalesce_query,
         coalesce_prefix_padded=coalesce_padded,
-        trace_layer=_trace_layer if cp_rank == 0 else None,
     )
     return blocks, config

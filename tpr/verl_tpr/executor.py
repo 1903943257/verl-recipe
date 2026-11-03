@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import os
-import time
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
@@ -331,7 +330,7 @@ class SegmentExecutor:
     def cp_enabled(self) -> bool:
         return self.cp_group is not None
 
-    def run(self, *, event_profiler=None, tree_index: int = 0) -> Tensor:
+    def run(self) -> Tensor:
         """Execute each branch, then replay its ancestors in postorder."""
         self._ensure_healthy()
         if self._ran:
@@ -342,35 +341,19 @@ class SegmentExecutor:
             self.kv_stack.assert_empty()
             if self.active_segment_ids == frozenset():
                 return torch.zeros((), device=self.prepared_model.device)
-            pending = [(self.plan.root_id, False, 0)]
+            pending = [(self.plan.root_id, False)]
             while pending:
-                segment_id, exiting, depth = pending.pop()
+                segment_id, exiting = pending.pop()
                 segment = self.plan.get(segment_id)
                 children = () if exiting else self._children_of(segment_id)
-                kind = "pop" if exiting else "push" if children else "visit_leaf"
-                profile = (
-                    None
-                    if event_profiler is None
-                    else event_profiler.begin(
-                        segment,
-                        kind=kind,
-                        tree_index=tree_index,
-                        depth=depth,
-                    )
-                )
                 if exiting:
                     losses.append(self.pop(segment_id))
                 elif children:
                     self.push(segment_id)
-                    pending.append((segment_id, True, depth))
-                    pending.extend(
-                        (child.segment_id, False, depth + 1)
-                        for child in reversed(children)
-                    )
+                    pending.append((segment_id, True))
+                    pending.extend((child.segment_id, False) for child in reversed(children))
                 else:
                     losses.append(self.visit_leaf(segment_id))
-                if event_profiler is not None:
-                    event_profiler.end(profile)
             self.kv_stack.assert_empty()
             total = losses[0]
             for loss in losses[1:]:
@@ -672,53 +655,3 @@ def _infer_layer_numbers(model: nn.Module) -> tuple[int, ...]:
         result.append(layer_number)
     return tuple(result)
 
-
-class SegmentEventProfiler:
-    def __init__(self):
-        self._pending = []
-        self.max_allocated_bytes = 0
-        self.max_reserved_bytes = 0
-
-    def begin(self, segment, *, kind: str, tree_index: int, depth: int):
-        self.max_allocated_bytes = max(self.max_allocated_bytes, int(torch.npu.max_memory_allocated()))
-        self.max_reserved_bytes = max(self.max_reserved_bytes, int(torch.npu.max_memory_reserved()))
-        # Reset the peak to attribute this event, without synchronizing the
-        # device. Caller must reconstruct the overall max after execution.
-        torch.npu.reset_peak_memory_stats()
-        start = torch.npu.Event(enable_timing=True)
-        end = torch.npu.Event(enable_timing=True)
-        start.record()
-        return {
-            "segment_id": int(segment.segment_id),
-            "parent_id": segment.parent_id,
-            "tree_index": int(tree_index),
-            "depth": int(depth),
-            "kind": kind,
-            "length": int(segment.length),
-            "prefix_length": int(segment.prefix_length),
-            "start_event": start,
-            "end_event": end,
-            "cpu_start": time.perf_counter(),
-            "alloc_before_bytes": int(torch.npu.memory_allocated()),
-            "reserved_before_bytes": int(torch.npu.memory_reserved()),
-        }
-
-    def end(self, pending):
-        pending["end_event"].record()
-        pending["cpu_enqueue_ms"] = (time.perf_counter() - pending.pop("cpu_start")) * 1000.0
-        pending["alloc_after_bytes"] = int(torch.npu.memory_allocated())
-        pending["reserved_after_bytes"] = int(torch.npu.memory_reserved())
-        pending["peak_allocated_bytes"] = int(torch.npu.max_memory_allocated())
-        pending["peak_reserved_bytes"] = int(torch.npu.max_memory_reserved())
-        self.max_allocated_bytes = max(self.max_allocated_bytes, pending["peak_allocated_bytes"])
-        self.max_reserved_bytes = max(self.max_reserved_bytes, pending["peak_reserved_bytes"])
-        self._pending.append(pending)
-
-    def materialize(self):
-        """Call after torch.npu.synchronize() ONCE per mini-batch."""
-        result = []
-        for pending in self._pending:
-            record = {k: v for k, v in pending.items() if k not in ("start_event", "end_event")}
-            record["npu_event_ms"] = float(pending["start_event"].elapsed_time(pending["end_event"]))
-            result.append(record)
-        return result
