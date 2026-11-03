@@ -13,7 +13,7 @@ This recipe is pinned to upstream `verl` commit [`2ab35292039a51175a4b3d3b3b2d76
 - **Training:** Uni-Agent + Claude Code with GRPO advantages
 - **Parallelism:** Tensor Parallelism (TP), Context Parallelism (CP), and Data Parallelism (DP)
 
-The `verl_tpr/` package implements prefix reuse, while `verl-tpr.patch` connects it to the VERL Megatron Engine.
+Ring CP enables Prefix QKV Merge and physical padding by default; no additional merge switches are required. The `verl_tpr/` package implements prefix reuse, while `verl-tpr.patch` connects it to the VERL Megatron Engine.
 
 ## Requirements
 

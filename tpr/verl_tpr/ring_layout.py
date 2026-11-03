@@ -448,9 +448,13 @@ def _prepare_ring_layout(
 
 
 def ring_merge_settings() -> tuple[bool, bool, bool]:
-    """Requested Prefix KV/Q/padded merging; experiments remain opt-in."""
+    """Enable Prefix QKV Merge and physical-padding merge by default.
+
+    Explicit environment overrides are retained for controlled ablations and
+    rollback; normal TPR execution requires no additional merge switches.
+    """
     return tuple(
-        os.getenv(name, "0") == "1"
+        os.getenv(name, "1") == "1"
         for name in (
             "TPR_RING_COALESCE_PREFIX_FULL",
             "TPR_RING_COALESCE_PREFIX_QUERY",
