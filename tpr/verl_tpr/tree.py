@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-from functools import lru_cache
 
 import numpy as np
 from bisect import bisect_right
@@ -25,7 +23,6 @@ from torch import Tensor
 
 
 SegmentId = int
-QWEN3_IM_END_TOKEN_ID = 151645
 SESSION_TREE_SCHEMA_VERSION = 1
 
 
@@ -199,357 +196,12 @@ def _parse_key(key: str) -> tuple[str, str, int]:
 
 
 @dataclass(slots=True)
-class _TurnNode:
+class _TreeNode:
     end: int
     source_row: int
     member_rows: list[int] = field(default_factory=list)
     terminal_rows: list[int] = field(default_factory=list)
-    children: dict[tuple[int, ...] | bytes, _TurnNode] = field(default_factory=dict)
-
-
-def _turn_units(tokens: list[int], prompt_length: int, minimum: int):
-    boundaries = {i + 1 for i, token in enumerate(tokens) if token == QWEN3_IM_END_TOKEN_ID}
-    if 0 < prompt_length < len(tokens):
-        boundaries.add(prompt_length)
-    boundaries.add(len(tokens))
-    previous = 0
-    for end in sorted(boundaries):
-        if end < len(tokens) and end - previous < minimum:
-            continue
-        yield tuple(tokens[previous:end]), end
-        previous = end
-
-
-def _turn_units_bytes(tokens: Tensor, prompt_length: int, minimum: int) -> tuple[tuple[bytes, int], ...]:
-    """Extract the same Turn units as _turn_units, using compact exact byte signatures.
-
-    Token IDs are CPU int64 values, so their contiguous byte representation is
-    an exact equality/sort key. This avoids materializing one Python int object
-    per token in the LCP path and lets sorting/LCP comparisons run in C.
-    """
-    boundaries = {
-        int(position) + 1
-        for position in torch.nonzero(tokens == QWEN3_IM_END_TOKEN_ID, as_tuple=False).flatten().tolist()
-    }
-    if 0 < prompt_length < tokens.numel():
-        boundaries.add(prompt_length)
-    boundaries.add(tokens.numel())
-    previous = 0
-    units = []
-    for end in sorted(boundaries):
-        if end < tokens.numel() and end - previous < minimum:
-            continue
-        signature = tokens[previous:end].contiguous().numpy().tobytes()
-        units.append((signature, end))
-        previous = end
-    return tuple(units)
-
-
-
-@dataclass(frozen=True, slots=True)
-class _RoleProbe:
-    headers: tuple[tuple[str, bytes, bool], ...]
-    endings: tuple[bytes, ...]
-
-
-def _coerce_probe_token_ids(value: Any) -> list[int]:
-    """Unwrap one token sequence from supported HF tokenizer return formats.
-
-    Some tokenizer versions or wrappers return BatchEncoding/input_ids, a
-    singleton batch, tuple, ndarray, or Tensor rather than a plain list.
-    Reject multi-row batches and non-integer values instead of guessing.
-    """
-    origin_type = type(value).__name__
-    if isinstance(value, Mapping):
-        if "input_ids" not in value:
-            raise TypeError(f"{origin_type} has no input_ids")
-        value = value["input_ids"]
-    if isinstance(value, (Tensor, np.ndarray)):
-        if value.ndim == 2 and value.shape[0] == 1:
-            value = value[0]
-        elif value.ndim != 1:
-            raise ValueError(f"{origin_type} has unsupported shape {tuple(value.shape)}")
-        value = value.tolist()
-    if isinstance(value, (tuple, list)) and len(value) == 1 and isinstance(value[0], (tuple, list)):
-        value = value[0]
-    if not isinstance(value, (tuple, list)):
-        raise TypeError(f"{origin_type} produced {type(value).__name__}, not a token sequence")
-    if any(
-        not isinstance(token, (int, np.integer)) or isinstance(token, (bool, np.bool_))
-        for token in value
-    ):
-        raise TypeError(f"{origin_type} contains non-integer or multi-row token IDs")
-    return [int(token) for token in value]
-
-
-def _find_role_marker(sequence: list[int], marker: list[int], start: int) -> int:
-    return next(
-        (i for i in range(start, len(sequence) - len(marker) + 1)
-         if sequence[i:i + len(marker)] == marker), -1
-    )
-
-
-def _find_marker_span_via_rendered_template(
-    tokenizer: Any, msgs: list[dict[str, str]], all_ids: list[int],
-    marker: str,
-) -> tuple[int, int] | None:
-    """Fallback when standalone marker tokenization differs in context.
-
-    Use the exact rendered chat template to locate a unique content sentinel.
-    The split is accepted ONLY if the surrounding token IDs match the actual
-    full-template encoding (or exact fast-tokenizer character offsets).
-    """
-    try:
-        rendered_text = tokenizer.apply_chat_template(
-            msgs, tokenize=False, add_generation_prompt=False
-        )
-    except (ValueError, TypeError, KeyError, RuntimeError):
-        return None
-    if not isinstance(rendered_text, str) or rendered_text.count(marker) != 1:
-        return None
-    start_char = rendered_text.index(marker)
-    end_char = start_char + len(marker)
-    try:
-        prefix = _coerce_probe_token_ids(
-            tokenizer.encode(rendered_text[:start_char], add_special_tokens=False)
-        )
-        suffix = _coerce_probe_token_ids(
-            tokenizer.encode(rendered_text[end_char:], add_special_tokens=False)
-        )
-    except (TypeError, ValueError):
-        prefix = suffix = None
-    if (prefix is not None and suffix is not None
-            and all_ids[:len(prefix)] == prefix
-            and (not suffix or all_ids[-len(suffix):] == suffix)
-            and len(prefix) + len(suffix) <= len(all_ids)):
-        return len(prefix), len(all_ids) - len(suffix)
-
-    # Fast tokenizers expose offsets for every token in the rendered text.
-    # Refuse a split unless both character boundaries coincide with tokens.
-    try:
-        encoded = tokenizer(
-            rendered_text, add_special_tokens=False, return_offsets_mapping=True
-        )
-        ids = _coerce_probe_token_ids(encoded)
-        offsets = encoded["offset_mapping"]
-        if isinstance(offsets, (Tensor, np.ndarray)):
-            offsets = offsets.tolist()
-    except (ValueError, TypeError, KeyError, RuntimeError, NotImplementedError):
-        return None
-    if ids != all_ids:
-        return None
-    starts = [i for i, (a, _b) in enumerate(offsets) if a == start_char]
-    ends = [i + 1 for i, (_a, b) in enumerate(offsets) if b == end_char]
-    if len(starts) != 1 or len(ends) != 1 or starts[0] >= ends[0]:
-        return None
-    return starts[0], ends[0]
-
-
-def _strip_exact_suffix(ids: list[int], suffix: list[int]) -> list[int]:
-    if suffix and len(ids) >= len(suffix) and ids[-len(suffix):] == suffix:
-        return ids[:-len(suffix)]
-    return ids
-
-
-def _probe_role_template(tokenizer: Any) -> _RoleProbe:
-    """Probe exact role header token IDs from a tokenizer's chat template.
-
-    No Qwen token ID is used. Unstable templates/implicit roles are not
-    assumed to have recoverable message boundaries.
-    """
-    marker = "TPRRoleProbeContentQ7X9"
-    before = "TPRRoleProbePreviousB8Y6"
-    marker_ids = _coerce_probe_token_ids(tokenizer.encode(marker, add_special_tokens=False))
-    if not marker_ids:
-        raise ValueError("empty role probe marker")
-    headers: list[tuple[str, bytes, bool]] = []
-    endings: list[bytes] = []
-    failures: dict[str, int] = {}
-    # Some templates append an open assistant header even when
-    # add_generation_prompt=False. Do not render []: HF wrappers may index
-    # conversation[0]. Infer this suffix by comparing non-empty renderings.
-    terminal_suffix = []
-    prefix_messages = [{"role": "user", "content": before}]
-    for next_role in ("assistant", "user"):
-        try:
-            prefix_ids = _coerce_probe_token_ids(tokenizer.apply_chat_template(
-                prefix_messages, tokenize=True, add_generation_prompt=False
-            ))
-            continued_ids = _coerce_probe_token_ids(tokenizer.apply_chat_template(
-                [*prefix_messages, {"role": next_role, "content": marker}],
-                tokenize=True, add_generation_prompt=False,
-            ))
-        except (ValueError, TypeError, KeyError, RuntimeError, IndexError):
-            continue
-        common = 0
-        while (common < min(len(prefix_ids), len(continued_ids))
-               and prefix_ids[common] == continued_ids[common]):
-            common += 1
-        candidate = prefix_ids[common:]
-        if candidate:
-            try:
-                suffix_text = tokenizer.decode(candidate, skip_special_tokens=False)
-            except (TypeError, ValueError, AttributeError):
-                continue
-            if "assistant" in suffix_text and before not in suffix_text:
-                terminal_suffix = candidate
-                break
-
-    def reject(reason: str) -> None:
-        failures[reason] = failures.get(reason, 0) + 1
-
-    # The final assistant may include a template-generated <think> prelude;
-    # a middle-of-conversation assistant usually has a shorter plain header.
-    # Probe both forms instead of treating the last-message form as canonical.
-    # Llama 3 uses "ipython" as a tool-execution role in its prompt format.
-    # Keep it as a semantic role candidate; it is discovered only when the
-    # tokenizer's own chat template can serialize it.
-    for role in ("system", "developer", "user", "assistant", "tool", "ipython"):
-        for following in (False, True):
-            for nonterminal in ((False, True) if role == "assistant" else (False,)):
-                prefix_msgs = [{"role": "user", "content": before}] if following else []
-                # A later user turn forces the target assistant to be non-final.
-                suffix_msgs = (
-                    [{"role": "user", "content": "TPRRoleProbeFollowingC5Z2"}]
-                    if nonterminal else []
-                )
-                msgs = [*prefix_msgs, {"role": role, "content": marker}, *suffix_msgs]
-                try:
-                    all_ids = _coerce_probe_token_ids(tokenizer.apply_chat_template(
-                        msgs, tokenize=True, add_generation_prompt=False
-                    ))
-                    old_ids = _coerce_probe_token_ids(tokenizer.apply_chat_template(
-                        prefix_msgs, tokenize=True, add_generation_prompt=False
-                    )) if following else []
-                    suffix_ids = _coerce_probe_token_ids(tokenizer.apply_chat_template(
-                        suffix_msgs, tokenize=True, add_generation_prompt=False
-                    )) if nonterminal else []
-                except (ValueError, TypeError, KeyError, RuntimeError, IndexError) as exc:
-                    reject(f"template_or_tokens_error:{type(exc).__name__}:{exc}")
-                    continue
-
-                all_ids = _strip_exact_suffix(all_ids, terminal_suffix)
-                old_ids = _strip_exact_suffix(old_ids, terminal_suffix)
-                suffix_ids = _strip_exact_suffix(suffix_ids, terminal_suffix)
-                bos_id = getattr(tokenizer, "bos_token_id", None)
-                if suffix_ids and bos_id is not None and suffix_ids[0] == int(bos_id):
-                    suffix_ids = suffix_ids[1:]
-
-                if following and all_ids[:len(old_ids)] != old_ids:
-                    terminal_id = getattr(tokenizer, "eos_token_id", None)
-                    while (
-                        terminal_id is not None
-                        and old_ids
-                        and old_ids[-1] == int(terminal_id)
-                        and all_ids[:len(old_ids) - 1] == old_ids[:-1]
-                    ):
-                        old_ids = old_ids[:-1]
-                if following and all_ids[:len(old_ids)] != old_ids:
-                    reject("previous_message_not_prefix")
-                    continue
-                if nonterminal and (not suffix_ids or all_ids[-len(suffix_ids):] != suffix_ids):
-                    reject("following_message_not_suffix")
-                    continue
-                target_end = len(all_ids) - len(suffix_ids)
-                body = _find_role_marker(all_ids, marker_ids, len(old_ids))
-                body_end = body + len(marker_ids)
-                if body < 0:
-                    span = _find_marker_span_via_rendered_template(
-                        tokenizer, msgs, all_ids, marker
-                    )
-                    if span is None:
-                        reject("marker_not_token_aligned")
-                        continue
-                    body, body_end = span
-                if body < len(old_ids) or body_end > target_end:
-                    reject("marker_outside_target_message")
-                    continue
-                header = all_ids[len(old_ids):body]
-                ending = all_ids[body_end:target_end]
-                if not header or not ending:
-                    reject("empty_header_or_ending")
-                    continue
-                if role not in tokenizer.decode(header, skip_special_tokens=False):
-                    reject("role_not_in_header")
-                    continue
-                item = (role, np.asarray(header, dtype=np.int64).tobytes(), not following)
-                if item not in headers:
-                    headers.append(item)
-                end_bytes = np.asarray(ending, dtype=np.int64).tobytes()
-                if end_bytes not in endings:
-                    endings.append(end_bytes)
-    if not headers or not endings:
-        raise ValueError(
-            "chat template has no stable explicit role headers; "
-            f"probe_failures={failures}; "
-            "check tokenizer.chat_template and probe token alignment"
-        )
-    return _RoleProbe(tuple(headers), tuple(endings))
-
-
-@lru_cache(maxsize=4)
-def _role_probe_from_path(path: str) -> _RoleProbe:
-    from transformers import AutoTokenizer
-
-    return _probe_role_template(AutoTokenizer.from_pretrained(
-        path, local_files_only=True, trust_remote_code=False
-    ))
-
-
-def _role_anchors(tokens: Tensor, probe: _RoleProbe) -> tuple[tuple[int, str], ...]:
-    """Locate exact headers, preferring the most specific complete pattern.
-
-    Chat templates may wrap a semantic tool message as a user message with a
-    <tool_response> prefix. The short user header then matches the start of
-    the longer tool header at exactly the same position. This is not a
-    conflicting boundary. If equally specific headers imply different roles,
-    the actual token stream is ambiguous: fail rather than guess.
-    """
-    raw = tokens.contiguous().numpy().tobytes()
-    candidates: dict[int, list[tuple[int, str]]] = {}
-    for role, header, first_only in probe.headers:
-        seek = 0
-        while (offset := raw.find(header, seek)) >= 0:
-            seek = offset + 1
-            if offset % 8:
-                continue
-            if offset == 0:
-                if not first_only:
-                    continue
-            elif first_only or not any(raw.endswith(end, 0, offset) for end in probe.endings):
-                continue
-            candidates.setdefault(offset // 8, []).append((len(header), role))
-    found = []
-    for pos, matches in sorted(candidates.items()):
-        longest = max(length for length, _ in matches)
-        roles = {role for length, role in matches if length == longest}
-        if len(roles) != 1:
-            raise ValueError(
-                f"conflicting longest Role candidates at {pos}: "
-                f"roles={sorted(roles)}, header_bytes={longest}"
-            )
-        found.append((pos, next(iter(roles))))
-    return tuple(found)
-
-
-def _role_units_bytes(
-    tokens: Tensor, prompt_length: int, minimum: int, probe: _RoleProbe
-) -> tuple[tuple[bytes, int], ...]:
-    """Token-exact units at candidate role starts; never split inside a short unit."""
-    if not 0 <= prompt_length <= tokens.numel():
-        raise ValueError("invalid prompt length")
-    boundaries = {pos for pos, _ in _role_anchors(tokens, probe) if 0 < pos < tokens.numel()}
-    if 0 < prompt_length < tokens.numel():
-        boundaries.add(prompt_length)
-    boundaries.add(tokens.numel())
-    previous = 0
-    units = []
-    for end in sorted(boundaries):
-        if end < tokens.numel() and end - previous < minimum:
-            continue
-        units.append((tokens[previous:end].contiguous().numpy().tobytes(), end))
-        previous = end
-    return tuple(units)
+    children: dict[tuple[int, ...] | bytes, _TreeNode] = field(default_factory=dict)
 
 
 def _unit_lcp(left: tuple[tuple[bytes, int], ...], right: tuple[tuple[bytes, int], ...]) -> int:
@@ -561,12 +213,12 @@ def _unit_lcp(left: tuple[tuple[bytes, int], ...], right: tuple[tuple[bytes, int
     return shared
 
 
-def _build_lcp_group(rows: list[tuple[int, tuple[tuple[bytes, int], ...]]]) -> _TurnNode:
-    """Build a compressed unit trie from sorted rows and adjacent LCPs.
+def _build_lcp_group(rows: list[tuple[int, tuple[tuple[bytes, int], ...]]]) -> _TreeNode:
+    """Build the compressed Token-LCP tree from sorted rows and adjacent LCPs.
 
-    The builder is deliberately unit-agnostic: callers provide exact byte
-    signatures and their token endpoints, so the same implementation serves
-    Token-LCP units and the retained legacy comparison path.
+    Callers provide exact byte signatures and token endpoints. The same
+    implementation serves flat minibatch rows and reconstructed TQ Session
+    Tree leaves.
     """
     if not rows:
         raise ValueError("LCP tree group must contain at least one trajectory")
@@ -577,7 +229,7 @@ def _build_lcp_group(rows: list[tuple[int, tuple[tuple[bytes, int], ...]]]) -> _
         rows,
         key=lambda item: (tuple(signature for signature, _ in item[1]), item[0]),
     )
-    root = _TurnNode(0, ordered[0][0])
+    root = _TreeNode(0, ordered[0][0])
     nodes = [root]
     previous_units = None
     previous_path = [root]
@@ -595,7 +247,7 @@ def _build_lcp_group(rows: list[tuple[int, tuple[tuple[bytes, int], ...]]]) -> _
         for signature, end in units[shared:]:
             if signature in parent.children:
                 raise RuntimeError("LCP builder encountered an existing suffix child")
-            child = _TurnNode(end, row)
+            child = _TreeNode(end, row)
             parent.children[signature] = child
             nodes.append(child)
             path.append(child)
@@ -620,7 +272,7 @@ def _build_lcp_group(rows: list[tuple[int, tuple[tuple[bytes, int], ...]]]) -> _
     return root
 
 
-def _compress(node: _TurnNode, parent_id: int | None, start: int, inputs: list[Tensor],
+def _compress(node: _TreeNode, parent_id: int | None, start: int, inputs: list[Tensor],
               segments: list[SegmentSpec], paths: dict[int, tuple[int, ...]], path: tuple[int, ...]) -> None:
     # Explicit DFS preserves insertion order without a Python recursion limit
     # on long conversations with terminal rows at many successive Turn nodes.
@@ -705,11 +357,11 @@ def _token_units_bytes(tokens: Tensor, cut_positions: set[int]) -> tuple[tuple[b
 
 def _build_unit_trie(
     rows: list[tuple[int, tuple[tuple[bytes, int], ...]]],
-) -> _TurnNode:
+) -> _TreeNode:
     """Insertion-order reference Trie for globally aligned exact Token units."""
     if not rows:
         raise ValueError("cannot build an empty unit Trie")
-    root = _TurnNode(0, rows[0][0])
+    root = _TreeNode(0, rows[0][0])
     for row, units in rows:
         if not units:
             raise ValueError(f"trajectory row {row} has no token units")
@@ -717,7 +369,7 @@ def _build_unit_trie(
         for signature, end in units:
             child = node.children.get(signature)
             if child is None:
-                child = _TurnNode(end, row)
+                child = _TreeNode(end, row)
                 node.children[signature] = child
             elif child.end != end:
                 raise RuntimeError("equal token unit signatures have inconsistent endpoints")
@@ -727,7 +379,7 @@ def _build_unit_trie(
     return root
 
 
-def _enforce_min_shared_token_branches(root: _TurnNode, minimum: int) -> None:
+def _enforce_min_shared_token_branches(root: _TreeNode, minimum: int) -> None:
     """Expand shared branches shorter than minimum into independent paths.
 
     Measure each candidate from the last retained shared branch on that path.
@@ -736,10 +388,10 @@ def _enforce_min_shared_token_branches(root: _TurnNode, minimum: int) -> None:
     Removing a short branch promotes its alternatives to the last retained
     ancestor; their next candidate is measured from that same ancestor.
     """
-    def row_order(node: _TurnNode) -> int:
+    def row_order(node: _TreeNode) -> int:
         return min(node.member_rows) if node.member_rows else node.source_row
 
-    def rewrite(node: _TurnNode, last_shared_end: int) -> list[_TurnNode]:
+    def rewrite(node: _TreeNode, last_shared_end: int) -> list[_TreeNode]:
         # Match the executor's compression: unary nodes do not form a
         # physical Segment boundary and must be included in the span check.
         while not node.terminal_rows and len(node.children) == 1:
@@ -762,7 +414,7 @@ def _enforce_min_shared_token_branches(root: _TurnNode, minimum: int) -> None:
             for child in node.children.values():
                 promoted.extend(rewrite(child, last_shared_end))
             for row in node.terminal_rows:
-                promoted.append(_TurnNode(
+                promoted.append(_TreeNode(
                     end=node.end,
                     source_row=row,
                     member_rows=[row],
@@ -797,39 +449,31 @@ def _enforce_min_shared_token_branches(root: _TurnNode, minimum: int) -> None:
 
 
 def build_tree_execution_plans(
-    keys: list[str] | tuple[str, ...], batch: Any, *,
+    keys: list[str] | tuple[str, ...],
+    batch: Any,
+    *,
     require_loss_mask_alignment: bool = False,
-    tree_policy: str = "token_lcp", turn_min_segment_tokens: int = 128,
+    tree_policy: str = "token_lcp",
     tree_builder: str = "lcp_sort",
     min_shared_prefix_tokens: int = 1024,
 ) -> ForestExecutionPlan:
-    """Build a Forest while retaining one PPO ObjectiveRef per supervised token.
+    """Build a Forest using exact Token-ID LCPs within this input minibatch.
 
-    token_lcp is model- and UID-agnostic: it groups rows by exact Token-ID
-    prefix within this input minibatch and only creates a shared physical tree
-    when the common prefix reaches min_shared_prefix_tokens. Logical UIDs
-    remain attached as member_uids and ObjectiveRefs retain original rows.
-
-    token_lcp is the default production policy. Legacy qwen_turn and
-    diagnostic role_probe remain available only for explicit compatibility
-    and controlled comparison.
+    Rows from different UIDs may share physical prefixes. UIDs remain attached
+    as member_uids, while ObjectiveRefs preserve original rows and supervised
+    token positions. Sharing is scoped to this supplied minibatch/DP replica.
+    token_lcp is the only supported tree policy; trie and LCP-sort builders
+    produce the same Token-LCP topology and are retained for parity checks.
     """
-    if tree_policy not in ("qwen_turn", "role_probe", "token_lcp"):
+    if tree_policy != "token_lcp":
         raise ValueError(f"unsupported TPR tree_policy: {tree_policy!r}")
-    role_probe = None
-    if tree_policy == "role_probe":
-        tokenizer_path = os.environ.get("TPR_ROLE_TOKENIZER_PATH")
-        if not tokenizer_path:
-            raise ValueError("role_probe requires TPR_ROLE_TOKENIZER_PATH")
-        role_probe = _role_probe_from_path(tokenizer_path)
     if tree_builder not in ("trie", "lcp_sort"):
         raise ValueError(f"unknown TPR tree_builder: {tree_builder!r}")
-    if (not isinstance(turn_min_segment_tokens, int) or isinstance(turn_min_segment_tokens, bool)
-            or turn_min_segment_tokens < 1):
-        raise ValueError("turn_min_segment_tokens must be a positive integer")
-    if (not isinstance(min_shared_prefix_tokens, int)
-            or isinstance(min_shared_prefix_tokens, bool)
-            or min_shared_prefix_tokens < 1):
+    if (
+        not isinstance(min_shared_prefix_tokens, int)
+        or isinstance(min_shared_prefix_tokens, bool)
+        or min_shared_prefix_tokens < 1
+    ):
         raise ValueError("min_shared_prefix_tokens must be a positive integer")
 
     inputs, masks = _rows(batch, "input_ids"), _rows(batch, "response_mask")
@@ -844,17 +488,22 @@ def build_tree_execution_plans(
         if values is not None and len(values) != len(keys):
             raise ValueError("optional batch field rows do not match keys")
 
-    groups: dict[str, _TurnNode] = {}
-    lcp_rows: dict[str, list[tuple[int, tuple[tuple[bytes, int], ...]]]] = {}
     token_rows: list[tuple[int, Tensor, str]] = []
     selected: list[list[int]] = []
     cpu_inputs: list[Tensor] = []
     prompt_lengths: list[int] = []
 
     for row, (key, tokens, mask) in enumerate(zip(keys, inputs, masks, strict=True)):
-        if (not tokens.numel() or tokens.dtype == torch.bool or torch.is_floating_point(tokens)
-                or torch.is_complex(tokens) or bool((tokens < 0).any())):
-            raise ValueError(f"input_ids[{row}] must contain non-empty non-negative integer token ids")
+        if (
+            not tokens.numel()
+            or tokens.dtype == torch.bool
+            or torch.is_floating_point(tokens)
+            or torch.is_complex(tokens)
+            or bool((tokens < 0).any())
+        ):
+            raise ValueError(
+                f"input_ids[{row}] must contain non-empty non-negative integer token ids"
+            )
         cpu_tokens = tokens.detach().to(device="cpu", dtype=torch.long)
         cpu_inputs.append(cpu_tokens)
         if mask.numel() > tokens.numel():
@@ -868,7 +517,9 @@ def build_tree_execution_plans(
                 raise ValueError(f"response is not an input_ids suffix on row {row}")
         offsets = torch.nonzero(mask.to(torch.bool), as_tuple=False).flatten().tolist()
         if offsets and response_start + offsets[0] == 0:
-            raise ValueError(f"row {row} has no preceding query token for first supervised token")
+            raise ValueError(
+                f"row {row} has no preceding query token for first supervised token"
+            )
         selected.append(offsets)
         if loss_masks is not None:
             loss_mask = loss_masks[row]
@@ -876,66 +527,45 @@ def build_tree_execution_plans(
                 if bool(loss_mask[:response_start].to(bool).any()):
                     raise ValueError(f"row {row} loss_mask includes prompt tokens")
                 loss_mask = loss_mask[response_start:]
-            if loss_mask.numel() != mask.numel() or not torch.equal(loss_mask.to(bool), mask.to(bool)):
+            if loss_mask.numel() != mask.numel() or not torch.equal(
+                loss_mask.to(bool), mask.to(bool)
+            ):
                 raise ValueError(f"row {row} response_mask and loss_mask disagree")
         prompt_length = 0
         if prompts is not None:
             prompt = prompts[row]
             prompt_length = prompt.numel()
-            if prompt_length > tokens.numel() or not torch.equal(tokens[:prompt_length].cpu(), prompt.cpu()):
-                raise ValueError(f"turn builder prompt is not an exact input prefix for row={row}")
+            if prompt_length > tokens.numel() or not torch.equal(
+                tokens[:prompt_length].cpu(), prompt.cpu()
+            ):
+                raise ValueError(f"prompt is not an exact input prefix for row={row}")
         uid, _, _ = _parse_key(key)
         prompt_lengths.append(prompt_length)
+        token_rows.append((row, cpu_tokens, uid))
 
-        if tree_policy == "token_lcp":
-            token_rows.append((row, cpu_tokens, uid))
-            continue
-
-        if role_probe is not None:
-            units = _role_units_bytes(cpu_tokens, prompt_length, turn_min_segment_tokens, role_probe)
-        elif tree_builder == "lcp_sort":
-            units = _turn_units_bytes(cpu_tokens, prompt_length, turn_min_segment_tokens)
-        else:
-            units = None
-        if tree_builder == "lcp_sort":
-            lcp_rows.setdefault(uid, []).append((row, units))
-        else:
-            node = groups.setdefault(uid, _TurnNode(0, row))
-            row_units = (
-                iter(units) if units is not None else
-                _turn_units(cpu_tokens.tolist(), prompt_length, turn_min_segment_tokens)
-            )
-            for signature, end in row_units:
-                node = node.children.setdefault(signature, _TurnNode(end, row))
-                node.member_rows.append(row)
-            node.terminal_rows.append(row)
-
-    group_entries: list[tuple[str, _TurnNode, tuple[str, ...], int | None]] = []
-    if tree_policy == "token_lcp":
-        clusters = _token_lcp_clusters(token_rows, prompt_lengths, min_shared_prefix_tokens)
-        for cluster_index, (cluster, cut_positions) in enumerate(clusters):
-            units_by_row = [
-                (row, _token_units_bytes(tokens, cut_positions))
-                for row, tokens, _uid in cluster
-            ]
-            root = (
-                _build_lcp_group(units_by_row)
-                if tree_builder == "lcp_sort"
-                else _build_unit_trie(units_by_row)
-            )
-            _enforce_min_shared_token_branches(root, min_shared_prefix_tokens)
-            member_uids = tuple(dict.fromkeys(uid for _row, _tokens, uid in cluster))
-            if len(root.children) != 1:
-                raise RuntimeError("token_lcp cluster does not have one common root prefix")
-            group_entries.append(("__minibatch__", root, member_uids, cluster_index))
-    else:
-        if tree_builder == "lcp_sort":
-            groups = {uid: _build_lcp_group(rows) for uid, rows in lcp_rows.items()}
-        group_entries = [(uid, root, (uid,), None) for uid, root in groups.items()]
+    group_entries: list[tuple[str, _TreeNode, tuple[str, ...], int]] = []
+    clusters = _token_lcp_clusters(
+        token_rows, prompt_lengths, min_shared_prefix_tokens
+    )
+    for cluster_index, (cluster, cut_positions) in enumerate(clusters):
+        units_by_row = [
+            (row, _token_units_bytes(tokens, cut_positions))
+            for row, tokens, _uid in cluster
+        ]
+        root = (
+            _build_lcp_group(units_by_row)
+            if tree_builder == "lcp_sort"
+            else _build_unit_trie(units_by_row)
+        )
+        _enforce_min_shared_token_branches(root, min_shared_prefix_tokens)
+        member_uids = tuple(dict.fromkeys(uid for _row, _tokens, uid in cluster))
+        if len(root.children) != 1:
+            raise RuntimeError("token_lcp cluster does not have one common root prefix")
+        group_entries.append(("__minibatch__", root, member_uids, cluster_index))
 
     result = []
     for uid, root, member_uids, cluster_index in group_entries:
-        for tree_index, child in enumerate(root.children.values()):
+        for child in root.children.values():
             segments, paths = [], {}
             _compress(child, None, 0, cpu_inputs, segments, paths, ())
             plan = SegmentPlan(segments, root_id=0)
@@ -947,18 +577,25 @@ def build_tree_execution_plans(
                 for offset in selected[row]:
                     target = response_start + offset
                     segment_id = path[bisect_right(ends, target - 1)]
-                    refs.append(SegmentObjectiveRef(
-                        segment_id, target - 1 - plan.get(segment_id).position_start,
-                        int(cpu_inputs[row][target]), row, offset,
-                    ))
-            result.append(TreeExecutionPlan(
-                uid,
-                cluster_index if cluster_index is not None else tree_index,
-                tuple(child.member_rows),
-                plan,
-                tuple(refs),
-                member_uids,
-            ))
+                    refs.append(
+                        SegmentObjectiveRef(
+                            segment_id,
+                            target - 1 - plan.get(segment_id).position_start,
+                            int(cpu_inputs[row][target]),
+                            row,
+                            offset,
+                        )
+                    )
+            result.append(
+                TreeExecutionPlan(
+                    uid,
+                    cluster_index,
+                    tuple(child.member_rows),
+                    plan,
+                    tuple(refs),
+                    member_uids,
+                )
+            )
     return ForestExecutionPlan(tuple(result), sum(map(len, selected)))
 
 
@@ -1203,35 +840,6 @@ def _concat_chunk_range(chunks: list[Tensor], start: int, end: int) -> Tensor:
     return parts[0].clone() if len(parts) == 1 else torch.cat(parts)
 
 
-def _session_tree_units(
-    chunks: list[Tensor], prompt_length: int, minimum: int
-) -> tuple[_SessionTreeUnit, ...]:
-    total = sum(chunk.numel() for chunk in chunks)
-    if total == 0:
-        raise ValueError("Session Tree Leaf resolves to an empty token sequence")
-    boundaries = set()
-    cursor = 0
-    for chunk in chunks:
-        ends = torch.nonzero(chunk == QWEN3_IM_END_TOKEN_ID, as_tuple=False).flatten().tolist()
-        boundaries.update(cursor + int(position) + 1 for position in ends)
-        cursor += chunk.numel()
-    if 0 < prompt_length < total:
-        boundaries.add(prompt_length)
-    boundaries.add(total)
-
-    result = []
-    previous = 0
-    for end in sorted(boundaries):
-        if end < total and end - previous < minimum:
-            continue
-        tokens = _concat_chunk_range(chunks, previous, end)
-        result.append(_SessionTreeUnit(
-            tokens.contiguous().numpy().tobytes(), previous, end, tokens
-        ))
-        previous = end
-    return tuple(result)
-
-
 def _token_session_units(
     tokens: Tensor, cut_positions: set[int]
 ) -> tuple[_SessionTreeUnit, ...]:
@@ -1251,7 +859,7 @@ def _token_session_units(
 
 
 def _compress_session_tree_units(
-    node: _TurnNode,
+    node: _TreeNode,
     parent_id: SegmentId | None,
     start: int,
     units_by_row: list[tuple[_SessionTreeUnit, ...]],
@@ -1294,33 +902,27 @@ def build_tree_execution_plans_from_session_trees(
     *,
     require_loss_mask_alignment: bool = False,
     tree_policy: str = "token_lcp",
-    turn_min_segment_tokens: int = 128,
     tree_builder: str = "lcp_sort",
     min_shared_prefix_tokens: int = 1024,
 ) -> ForestExecutionPlan:
-    """Build a minibatch Forest directly from independent Session Tree payloads.
+    """Build a minibatch Forest from Session Trees using exact Token-ID LCPs.
 
-    token_lcp clusters exact Token-ID prefixes across all Sessions/UIDs in
-    this supplied minibatch and retains logical UIDs in member_uids. Since only
-    the supplied minibatch is visible here, sharing cannot cross DP/minibatch
-    scope. Legacy qwen_turn remains available only when explicitly requested.
+    All Sessions/UIDs in this supplied minibatch participate in token-prefix
+    clustering. Logical UIDs remain in member_uids; sharing cannot cross the
+    supplied DP/minibatch scope. token_lcp is the only supported policy.
     """
     if not session_trees:
         raise ValueError("cannot build a Forest from an empty Session Tree batch")
-    if tree_policy not in ("qwen_turn", "token_lcp"):
+    if tree_policy != "token_lcp":
         raise ValueError(f"unsupported Session Tree policy: {tree_policy!r}")
     if tree_builder not in ("trie", "lcp_sort"):
         raise ValueError(f"unknown TPR tree_builder: {tree_builder!r}")
-    if (not isinstance(turn_min_segment_tokens, int) or isinstance(turn_min_segment_tokens, bool)
-            or turn_min_segment_tokens < 1):
-        raise ValueError("turn_min_segment_tokens must be a positive integer")
     if (not isinstance(min_shared_prefix_tokens, int)
             or isinstance(min_shared_prefix_tokens, bool)
             or min_shared_prefix_tokens < 1):
         raise ValueError("min_shared_prefix_tokens must be a positive integer")
 
     seen_trees, seen_sessions = set(), set()
-    grouped_rows: dict[str, list[tuple[int, tuple[_SessionTreeUnit, ...], int, list[int]]]] = {}
     units_by_row: list[tuple[_SessionTreeUnit, ...]] = []
     selected_by_row: list[list[int]] = []
     prompt_lengths: list[int] = []
@@ -1439,59 +1041,33 @@ def build_tree_execution_plans_from_session_trees(
             selected = torch.nonzero(response_mask, as_tuple=False).flatten().tolist()
             if selected and prompt_length + selected[0] == 0:
                 raise ValueError("Leaf has no preceding query token for its first supervised token")
-            if tree_policy == "token_lcp":
-                full_tokens = _concat_chunk_range(chunks, 0, total_length)
-                token_rows.append((row_index, full_tokens, uid))
-                units: tuple[_SessionTreeUnit, ...] = ()
-            else:
-                units = _session_tree_units(chunks, prompt_length, turn_min_segment_tokens)
-                grouped_rows.setdefault(uid, []).append(
-                    (row_index, units, prompt_length, selected)
-                )
-            units_by_row.append(units)
+            full_tokens = _concat_chunk_range(chunks, 0, total_length)
+            token_rows.append((row_index, full_tokens, uid))
+            units_by_row.append(())
             selected_by_row.append(selected)
             prompt_lengths.append(prompt_length)
             row_index += 1
 
-    group_entries: list[tuple[str, _TurnNode, tuple[str, ...], int | None]] = []
-    if tree_policy == "token_lcp":
-        for cluster_index, (cluster, cut_positions) in enumerate(
-            _token_lcp_clusters(token_rows, prompt_lengths, min_shared_prefix_tokens)
-        ):
-            for row, tokens, _uid in cluster:
-                units_by_row[row] = _token_session_units(tokens, cut_positions)
-            unit_rows = [
-                (row, tuple((unit.signature, unit.end) for unit in units_by_row[row]))
-                for row, _tokens, _uid in cluster
-            ]
-            root = (
-                _build_lcp_group(unit_rows)
-                if tree_builder == "lcp_sort"
-                else _build_unit_trie(unit_rows)
-            )
-            _enforce_min_shared_token_branches(root, min_shared_prefix_tokens)
-            member_uids = tuple(dict.fromkeys(uid for _row, _tokens, uid in cluster))
-            if len(root.children) != 1:
-                raise RuntimeError("token_lcp Session cluster does not have one common root prefix")
-            group_entries.append(("__minibatch__", root, member_uids, cluster_index))
-    else:
-        for uid, rows in grouped_rows.items():
-            if tree_builder == "lcp_sort":
-                root = _build_lcp_group([
-                    (row, tuple((unit.signature, unit.end) for unit in units))
-                    for row, units, _, _ in rows
-                ])
-            else:
-                root = _TurnNode(0, rows[0][0])
-                for row, units, _, _ in rows:
-                    node = root
-                    for unit in units:
-                        node = node.children.setdefault(
-                            unit.signature, _TurnNode(unit.end, row)
-                        )
-                        node.member_rows.append(row)
-                    node.terminal_rows.append(row)
-            group_entries.append((uid, root, (uid,), None))
+    group_entries: list[tuple[str, _TreeNode, tuple[str, ...], int]] = []
+    for cluster_index, (cluster, cut_positions) in enumerate(
+        _token_lcp_clusters(token_rows, prompt_lengths, min_shared_prefix_tokens)
+    ):
+        for row, tokens, _uid in cluster:
+            units_by_row[row] = _token_session_units(tokens, cut_positions)
+        unit_rows = [
+            (row, tuple((unit.signature, unit.end) for unit in units_by_row[row]))
+            for row, _tokens, _uid in cluster
+        ]
+        root = (
+            _build_lcp_group(unit_rows)
+            if tree_builder == "lcp_sort"
+            else _build_unit_trie(unit_rows)
+        )
+        _enforce_min_shared_token_branches(root, min_shared_prefix_tokens)
+        member_uids = tuple(dict.fromkeys(uid for _row, _tokens, uid in cluster))
+        if len(root.children) != 1:
+            raise RuntimeError("token_lcp Session cluster does not have one common root prefix")
+        group_entries.append(("__minibatch__", root, member_uids, cluster_index))
 
     result = []
     for uid, root, member_uids, cluster_index in group_entries:
