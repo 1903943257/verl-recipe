@@ -24,6 +24,7 @@ from megatron.core.transformer.transformer_block import TransformerBlock
 from verl_tpr.attention import TPRSelfAttention
 from verl_tpr.context import get_tpr_attention_context, use_tpr_attention_context
 
+
 def validate_tpr_recompute_config(config: Any) -> bool:
     """Return whether the explicitly supported TPR recompute mode is selected."""
     granularity = getattr(config, "recompute_granularity", None)
