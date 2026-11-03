@@ -358,6 +358,7 @@ def run_tpr_forward_backward_batch(
         raise RuntimeError("TPR PPO requires native finalize_model_grads_func")
 
     metrics = _PPOMetrics()
+
     def run_one_tree(tree_plan):
         shard_for_segment = (
             None if cp_runtime.ring is None else lambda segment: cp_runtime.ring.make_sequence_shard(segment.length)

@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from .state import KVStack, PastKVAnchors
 
 
-
 def ring_cp_attention(
     query: Tensor,
     current_key: Tensor,
