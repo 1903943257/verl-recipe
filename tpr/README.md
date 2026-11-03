@@ -2,6 +2,11 @@
 
 TPR reuses shared prefixes across agent trajectories during VERL Megatron Actor training. See [RFC #7561](https://github.com/verl-project/verl/issues/7561).
 
+
+## Required `verl` version
+
+See [`REQUIRED_VERL.txt`](REQUIRED_VERL.txt).
+
 ## Overview
 
 - **Model:** [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)
