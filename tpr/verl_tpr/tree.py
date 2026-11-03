@@ -2,7 +2,7 @@
 """Token-level prefix sharing and native PPO query ownership.
 
 The compressed SegmentPlan is the only persistent physical topology. Temporary
-Turn trie nodes are discarded after assigning each logical response token to
+tree nodes are discarded after assigning each logical response token to
 its predicting query, including child-first tokens predicted by the parent.
 """
 
@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-
-import numpy as np
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -275,7 +274,7 @@ def _build_lcp_group(rows: list[tuple[int, tuple[tuple[bytes, int], ...]]]) -> _
 def _compress(node: _TreeNode, parent_id: int | None, start: int, inputs: list[Tensor],
               segments: list[SegmentSpec], paths: dict[int, tuple[int, ...]], path: tuple[int, ...]) -> None:
     # Explicit DFS preserves insertion order without a Python recursion limit
-    # on long conversations with terminal rows at many successive Turn nodes.
+    # on long conversations with terminal rows at many successive tree nodes.
     pending = [(node, parent_id, start, path)]
     while pending:
         node, parent_id, start, path = pending.pop()
