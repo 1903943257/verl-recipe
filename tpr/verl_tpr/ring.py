@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-import torch
 import torch.distributed as dist
 from torch import Tensor
 

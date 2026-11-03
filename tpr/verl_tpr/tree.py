@@ -31,16 +31,23 @@ class SegmentSpec:
     prefix_length: int
 
     def __post_init__(self) -> None:
-        for name, value in (("segment_id", self.segment_id),
-                            ("position_start", self.position_start),
-                            ("prefix_length", self.prefix_length)):
+        for name, value in (
+            ("segment_id", self.segment_id),
+            ("position_start", self.position_start),
+            ("prefix_length", self.prefix_length),
+        ):
             _validate_segment_id(value, field_name=name)
         if self.parent_id is not None:
             _validate_segment_id(self.parent_id, field_name="parent_id")
         ids = self.token_ids
-        if (self.prefix_length != self.position_start or not isinstance(ids, Tensor)
-                or ids.device.type != "cpu" or ids.dtype != torch.long
-                or ids.ndim != 1 or not ids.numel()):
+        if (
+            self.prefix_length != self.position_start
+            or not isinstance(ids, Tensor)
+            or ids.device.type != "cpu"
+            or ids.dtype != torch.long
+            or ids.ndim != 1
+            or not ids.numel()
+        ):
             raise ValueError("invalid SegmentSpec token range or token_ids")
         if bool((ids < 0).any()):
             raise ValueError("token_ids must be non-negative")
@@ -63,8 +70,7 @@ class SegmentPlan:
 
     def __post_init__(self) -> None:
         _validate_segment_id(self.root_id, field_name="root_id")
-        source = list(self.segments.values() if isinstance(self.segments, Mapping)
-                      else self.segments)
+        source = list(self.segments.values() if isinstance(self.segments, Mapping) else self.segments)
         if not all(isinstance(item, SegmentSpec) for item in source):
             raise TypeError("segments must contain SegmentSpec objects")
         segments = {item.segment_id: item for item in source}
@@ -84,9 +90,7 @@ class SegmentPlan:
                 raise ValueError(f"segment {item.segment_id} must start at parent end")
             children[item.parent_id].append(item.segment_id)
         object.__setattr__(self, "segments", MappingProxyType(segments))
-        object.__setattr__(self, "_children", MappingProxyType(
-            {key: tuple(value) for key, value in children.items()}
-        ))
+        object.__setattr__(self, "_children", MappingProxyType({key: tuple(value) for key, value in children.items()}))
 
     def get(self, segment_id: SegmentId) -> SegmentSpec:
         return self.segments[segment_id]
@@ -219,24 +223,29 @@ def _build_lcp_tree(rows: list[tuple[int, Tensor, str]]) -> _TreeNode:
     return root.children[0]
 
 
-def _compress(node: _TreeNode, parent_id: int | None, start: int,
-              inputs: list[Tensor], minimum: int, segments: list[SegmentSpec],
-              paths: dict[int, tuple[int, ...]], path: tuple[int, ...]) -> None:
+def _compress(
+    node: _TreeNode,
+    parent_id: int | None,
+    start: int,
+    inputs: list[Tensor],
+    minimum: int,
+    segments: list[SegmentSpec],
+    paths: dict[int, tuple[int, ...]],
+    path: tuple[int, ...],
+) -> None:
     while not node.terminal_rows and len(node.children) == 1:
         node = node.children[0]
     branches = len(node.children) + int(bool(node.terminal_rows))
     if node.end - start < minimum and (branches > 1 or len(node.terminal_rows) > 1):
         for row in node.terminal_rows:
             sid = len(segments)
-            segments.append(SegmentSpec(sid, parent_id, inputs[row][start:node.end],
-                                        start, start))
+            segments.append(SegmentSpec(sid, parent_id, inputs[row][start : node.end], start, start))
             paths[row] = (*path, sid)
         for child in node.children:
             _compress(child, parent_id, start, inputs, minimum, segments, paths, path)
         return
     sid = len(segments)
-    segments.append(SegmentSpec(sid, parent_id, inputs[node.source_row][start:node.end],
-                                start, start))
+    segments.append(SegmentSpec(sid, parent_id, inputs[node.source_row][start : node.end], start, start))
     current = (*path, sid)
     for row in node.terminal_rows:
         paths[row] = current
@@ -245,33 +254,41 @@ def _compress(node: _TreeNode, parent_id: int | None, start: int,
 
 
 def build_tree_execution_plans(
-    keys: list[str] | tuple[str, ...], batch: Any, *,
+    keys: list[str] | tuple[str, ...],
+    batch: Any,
+    *,
     require_loss_mask_alignment: bool = False,
-    tree_policy: str = "token_lcp", tree_builder: str = "lcp_sort",
+    tree_policy: str = "token_lcp",
+    tree_builder: str = "lcp_sort",
     min_shared_prefix_tokens: int = 1024,
 ) -> ForestExecutionPlan:
     """Build a minibatch-wide forest using exact Token-ID prefixes."""
     if tree_policy != "token_lcp" or tree_builder != "lcp_sort":
         raise ValueError("TPR supports only the token_lcp/lcp_sort tree builder")
-    if (not isinstance(min_shared_prefix_tokens, int)
-            or isinstance(min_shared_prefix_tokens, bool)
-            or min_shared_prefix_tokens < 1):
+    if (
+        not isinstance(min_shared_prefix_tokens, int)
+        or isinstance(min_shared_prefix_tokens, bool)
+        or min_shared_prefix_tokens < 1
+    ):
         raise ValueError("min_shared_prefix_tokens must be a positive integer")
     inputs, masks = _rows(batch, "input_ids"), _rows(batch, "response_mask")
-    if (len(keys) != len(inputs) or len(keys) != len(masks)
-            or len(set(keys)) != len(keys)):
+    if len(keys) != len(inputs) or len(keys) != len(masks) or len(set(keys)) != len(keys):
         raise ValueError("keys and batch rows must match uniquely")
     responses = _rows(batch, "responses") if "responses" in batch else None
     loss_masks = _rows(batch, "loss_mask") if require_loss_mask_alignment else None
-    if any(values is not None and len(values) != len(keys)
-           for values in (responses, loss_masks)):
+    if any(values is not None and len(values) != len(keys) for values in (responses, loss_masks)):
         raise ValueError("optional batch field rows do not match keys")
 
     token_rows, selected, cpu_inputs = [], [], []
     for row, (key, tokens, mask) in enumerate(zip(keys, inputs, masks, strict=True)):
-        if (not isinstance(key, str) or not tokens.numel() or tokens.dtype == torch.bool
-                or torch.is_floating_point(tokens) or torch.is_complex(tokens)
-                or bool((tokens < 0).any())):
+        if (
+            not isinstance(key, str)
+            or not tokens.numel()
+            or tokens.dtype == torch.bool
+            or torch.is_floating_point(tokens)
+            or torch.is_complex(tokens)
+            or bool((tokens < 0).any())
+        ):
             raise ValueError(f"invalid trajectory key or input_ids[{row}]")
         fields = key.rsplit("_", 2) if isinstance(key, str) else []
         if len(fields) != 3 or not all(fields) or not fields[2].isdigit():
@@ -282,8 +299,7 @@ def build_tree_execution_plans(
             raise ValueError(f"response_mask[{row}] is longer than input_ids[{row}]")
         response_start = tokens.numel() - mask.numel()
         if responses is not None and (
-            responses[row].numel() != mask.numel()
-            or not torch.equal(tokens[response_start:], responses[row])
+            responses[row].numel() != mask.numel() or not torch.equal(tokens[response_start:], responses[row])
         ):
             raise ValueError(f"response is not an input_ids suffix on row {row}")
         offsets = torch.nonzero(mask.to(torch.bool), as_tuple=False).flatten().tolist()
@@ -295,21 +311,16 @@ def build_tree_execution_plans(
                 if bool(loss[:response_start].to(bool).any()):
                     raise ValueError(f"row {row} loss_mask includes prompt tokens")
                 loss = loss[response_start:]
-            if (loss.numel() != mask.numel()
-                    or not torch.equal(loss.to(bool), mask.to(bool))):
+            if loss.numel() != mask.numel() or not torch.equal(loss.to(bool), mask.to(bool)):
                 raise ValueError(f"row {row} response_mask and loss_mask disagree")
         token_rows.append((row, cpu, fields[0]))
         selected.append(offsets)
 
     result = []
-    for tree_index, cluster in enumerate(
-        _clusters(token_rows, min_shared_prefix_tokens)
-    ):
+    for tree_index, cluster in enumerate(_clusters(token_rows, min_shared_prefix_tokens)):
         root = _build_lcp_tree(cluster)
         segments, paths = [], {}
-        _compress(
-            root, None, 0, cpu_inputs, min_shared_prefix_tokens, segments, paths, ()
-        )
+        _compress(root, None, 0, cpu_inputs, min_shared_prefix_tokens, segments, paths, ())
         members = tuple(sorted(item[0] for item in cluster))
         uids = tuple(dict.fromkeys(token_rows[row][2] for row in members))
         plan, refs = SegmentPlan(segments, root_id=0), []
@@ -320,13 +331,16 @@ def build_tree_execution_plans(
             for offset in selected[row]:
                 target = response_start + offset
                 segment_id = path[bisect_right(ends, target - 1)]
-                refs.append(SegmentObjectiveRef(
-                    segment_id, target - 1 - plan.get(segment_id).position_start,
-                    int(cpu_inputs[row][target]), row, offset,
-                ))
-        result.append(TreeExecutionPlan(
-            "__minibatch__", tree_index, members, plan, tuple(refs), uids
-        ))
+                refs.append(
+                    SegmentObjectiveRef(
+                        segment_id,
+                        target - 1 - plan.get(segment_id).position_start,
+                        int(cpu_inputs[row][target]),
+                        row,
+                        offset,
+                    )
+                )
+        result.append(TreeExecutionPlan("__minibatch__", tree_index, members, plan, tuple(refs), uids))
     return ForestExecutionPlan(tuple(result), sum(map(len, selected)))
 
 
@@ -337,10 +351,15 @@ def _write_record(hasher, record) -> None:
 def _write_plan(hasher, plan: SegmentPlan) -> None:
     _write_record(hasher, plan.root_id)
     for segment in plan.segments.values():
-        _write_record(hasher, (
-            segment.segment_id, segment.parent_id,
-            segment.position_start, segment.length,
-        ))
+        _write_record(
+            hasher,
+            (
+                segment.segment_id,
+                segment.parent_id,
+                segment.position_start,
+                segment.length,
+            ),
+        )
         hasher.update(segment.token_ids.contiguous().numpy().tobytes())
 
 
@@ -354,15 +373,19 @@ def digest_forest_plan(forest: ForestExecutionPlan) -> str:
     hasher = hashlib.sha256(b"TPR-PPO-tree-v3")
     _write_record(hasher, forest.logical_loss_tokens)
     for tree in forest.trees:
-        _write_record(hasher, (
-            tree.uid, tree.tree_index, tree.member_rows, tree.member_uids or (tree.uid,)
-        ))
+        _write_record(hasher, (tree.uid, tree.tree_index, tree.member_rows, tree.member_uids or (tree.uid,)))
         _write_plan(hasher, tree.segment_plan)
         for ref in tree.objective_refs:
-            _write_record(hasher, (
-                ref.segment_id, ref.query_offset, ref.target_token_id,
-                ref.sample_row, ref.response_offset,
-            ))
+            _write_record(
+                hasher,
+                (
+                    ref.segment_id,
+                    ref.query_offset,
+                    ref.target_token_id,
+                    ref.sample_row,
+                    ref.response_offset,
+                ),
+            )
     return hasher.hexdigest()
 
 
@@ -380,11 +403,14 @@ def assert_tp_plan_agreement(digest: str, *, tp_size: int, cp_size: int = 1) -> 
 
     if not dist.is_available() or not dist.is_initialized():
         raise RuntimeError("TPR distributed process group is not initialized")
-    group = (parallel_state.get_tensor_and_context_parallel_group() if cp_size > 1
-             else parallel_state.get_tensor_model_parallel_group())
+    group = (
+        parallel_state.get_tensor_and_context_parallel_group()
+        if cp_size > 1
+        else parallel_state.get_tensor_model_parallel_group()
+    )
     if group is None or dist.get_world_size(group=group) != size:
         raise RuntimeError("TPR native TP/CP process group size mismatch")
-    words = [int(digest[i:i + 8], 16) for i in range(0, 64, 8)]
+    words = [int(digest[i : i + 8], 16) for i in range(0, 64, 8)]
     device = torch.device("cpu")
     if dist.get_backend(group) != "gloo":
         from verl.utils.device import get_device_id, get_device_name

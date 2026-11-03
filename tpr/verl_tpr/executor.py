@@ -163,7 +163,6 @@ def _validate_length(name: str, value: int, *, allow_zero: bool) -> None:
 
 
 
-
 @dataclass(frozen=True, slots=True)
 class PreparedReplayModel:
     """Batch-scoped static model facts and live stochastic-setting references.
@@ -653,4 +652,3 @@ def _infer_layer_numbers(model: nn.Module) -> tuple[int, ...]:
             raise ValueError("cannot infer layer_number from model.decoder.layers")
         result.append(layer_number)
     return tuple(result)
-

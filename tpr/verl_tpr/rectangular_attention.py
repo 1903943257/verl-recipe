@@ -60,10 +60,7 @@ def _validate_inputs(query: Tensor, key: Tensor, value: Tensor, dropout_p: float
     if value.shape != key.shape:
         raise ValueError(f"key and value must have identical shapes, got key={key.shape}, value={value.shape}")
     if query_batch_size != 1 or key_batch_size != 1:
-        raise ValueError(
-            "rectangular attention requires batch size 1, "
-            f"got Q={query_batch_size}, KV={key_batch_size}"
-        )
+        raise ValueError(f"rectangular attention requires batch size 1, got Q={query_batch_size}, KV={key_batch_size}")
     if query_length <= 0 or kv_length <= 0:
         raise ValueError(f"sequence lengths must be positive, got Q={query_length}, KV={kv_length}")
     if query_length > kv_length:
