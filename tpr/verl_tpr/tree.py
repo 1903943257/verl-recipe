@@ -258,13 +258,9 @@ def build_tree_execution_plans(
     batch: Any,
     *,
     require_loss_mask_alignment: bool = False,
-    tree_policy: str = "token_lcp",
-    tree_builder: str = "lcp_sort",
     min_shared_prefix_tokens: int = 1024,
 ) -> ForestExecutionPlan:
     """Build a minibatch-wide forest using exact Token-ID prefixes."""
-    if tree_policy != "token_lcp" or tree_builder != "lcp_sort":
-        raise ValueError("TPR supports only the token_lcp/lcp_sort tree builder")
     if (
         not isinstance(min_shared_prefix_tokens, int)
         or isinstance(min_shared_prefix_tokens, bool)

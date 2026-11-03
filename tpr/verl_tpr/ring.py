@@ -269,9 +269,14 @@ def aggregate_cp_loss(
     normalized_loss: Tensor,
     runtime: TPREngineCPRuntime,
 ) -> tuple[Tensor, Tensor]:
+    """Aggregate CP losses, sharing the collective when both inputs are identical."""
     global_loss_sum = loss_sum.detach().clone()
-    global_normalized_loss = normalized_loss.detach().clone()
     if runtime.enabled:
         dist.all_reduce(global_loss_sum, op=dist.ReduceOp.SUM, group=runtime.group)
+    if loss_sum is normalized_loss:
+        return global_loss_sum, global_loss_sum.clone()
+
+    global_normalized_loss = normalized_loss.detach().clone()
+    if runtime.enabled:
         dist.all_reduce(global_normalized_loss, op=dist.ReduceOp.SUM, group=runtime.group)
     return global_loss_sum, global_normalized_loss
