@@ -17,9 +17,9 @@ The `verl_tpr/` package implements prefix reuse, while `verl-tpr.patch` connects
 
 ## Requirements
 
-An Ascend environment with Megatron-Core, MindSpeed, Ray, vLLM-Ascend and Megatron-Bridge is required. The example uses eight NPUs.
+This example uses Uni-Agent to run SWE-ReBench tasks with Claude Code as the coding agent. The training environment requires Ascend, Megatron-Core, MindSpeed, Ray, vLLM-Ascend and Megatron-Bridge; the example is configured for eight NPUs.
 
-The training container must have Docker CLI access to a host Docker daemon for `linux/amd64` SWE-ReBench sandboxes. Uni-Agent installs Claude Code inside the sandbox automatically when network access is available.
+The included task configuration uses Uni-Agent's Docker sandbox provider and launches the SWE-ReBench image as `linux/amd64`. To use this configuration, the training container needs Docker CLI access to a trusted Docker daemon. The daemon does not have to run on the host: a host daemon is one deployment option, and a remote Docker endpoint can also be used. Other Uni-Agent sandbox providers may not require Docker. Uni-Agent installs Claude Code inside the sandbox automatically when network access is available.
 
 ## Installation
 
@@ -83,14 +83,14 @@ The launcher runs 10 training steps by default. Set `TOTAL_TRAINING_STEPS` to ch
 
 ## Configuration
 
-The launcher exposes the following commonly adjusted settings. Data parallelism (DP) is calculated automatically from the total NPU count.
+The training script exposes the following commonly adjusted settings. Data parallelism (DP) is calculated automatically from the total NPU count.
 
 | Setting | Default | Description |
 | --- | ---: | --- |
 | `NNODES` / `N_GPUS_PER_NODE` | `1` / `8` | Number of nodes and NPUs per node |
-| `TRAIN_TP` / `TRAIN_CP` | `2` / `4` | Actor tensor and context parallel sizes |
+| `TRAIN_TP` / `TRAIN_CP` | `2` / `4` | Actor tensor and context parallel sizes; Sequence Parallel is enabled by default |
 | DP | Automatic | Derived from the total NPU count, TP, and CP |
 | `N` / `CONCURRENCY` | `8` / `8` | Trajectories per prompt and concurrent agent sessions |
-| `MAX_PROMPT_LENGTH` / `MAX_RESPONSE_LENGTH` | `18432` / `2048` | Maximum prompt and response lengths |
+| `MAX_PROMPT_LENGTH` / `MAX_RESPONSE_LENGTH` | `16384` / `16384` | Maximum prompt and response lengths |
 | `TPR_ENABLED` | `True` | Enable TPR; set to `False` to use the original Full path |
 | `TOTAL_TRAINING_STEPS` | `10` | Number of training steps |

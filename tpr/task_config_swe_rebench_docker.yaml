@@ -1,5 +1,5 @@
-# Local Docker task sandbox. The separate PPO training container needs
-# Docker CLI plus access to a trusted host Docker daemon.
+# Uni-Agent Docker sandbox. The PPO training container needs Docker CLI
+# access to a trusted Docker daemon (host-local or remote).
 - name: swe_rebench
   sandbox:
     provider: docker
