@@ -344,7 +344,6 @@ class SegmentExecutor:
             pending = [(self.plan.root_id, False)]
             while pending:
                 segment_id, exiting = pending.pop()
-                segment = self.plan.get(segment_id)
                 children = () if exiting else self._children_of(segment_id)
                 if exiting:
                     losses.append(self.pop(segment_id))
