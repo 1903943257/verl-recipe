@@ -19,7 +19,7 @@ Ring CP enables Prefix QKV Merge and physical padding by default; no additional 
 
 This example uses Uni-Agent to run SWE-ReBench tasks with Claude Code as the coding agent. The training environment requires Ascend, Megatron-Core, MindSpeed, Ray, vLLM-Ascend and Megatron-Bridge; the example is configured for eight NPUs.
 
-The included Uni-Agent task configuration uses Docker sandbox for SWE-ReBench and launches the image as `linux/amd64`. The training container needs Docker CLI access to the Docker daemon. Uni-Agent installs Claude Code inside the sandbox automatically when network access is available.
+The included Uni-Agent task configuration uses Docker sandbox for SWE-ReBench and launches the image as `linux/amd64`. The training container needs Docker CLI configured to start the sandbox. Uni-Agent installs Claude Code inside the sandbox automatically when network access is available.
 
 ## Installation
 

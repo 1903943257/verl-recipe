@@ -1,5 +1,5 @@
 # Uni-Agent Docker sandbox. The PPO training container needs Docker CLI
-# access to a trusted Docker daemon (host-local or remote).
+# configured for sandbox startup.
 - name: swe_rebench
   sandbox:
     provider: docker
