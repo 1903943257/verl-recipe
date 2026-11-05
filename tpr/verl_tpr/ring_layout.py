@@ -358,6 +358,7 @@ def make_ring_sequence_shard(
         padded_length=padded_length,
     )
 
+
 def classify_ring_block(
     query_range: SequenceRange,
     kv_range: SequenceRange,
