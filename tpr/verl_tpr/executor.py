@@ -568,7 +568,8 @@ class SegmentExecutor:
         if not self.cp_enabled:
             if self.sp_tp_size > 1:
                 return make_cp1_sp_sequence_shard(
-                    segment.length, sp_tp_size=self.sp_tp_size,
+                    segment.length,
+                    sp_tp_size=self.sp_tp_size,
                 )
             return SequenceShard.full(segment.length)
         if self.ring_runtime is None:
