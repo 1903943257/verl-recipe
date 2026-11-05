@@ -23,7 +23,7 @@ source /opt/miniconda3/bin/activate
 conda activate testbed
 python --version
 python -m pip check
-python -c "import pyopenapi3; print(pyopenapi3.__file__)"
+python -c "from pyopenapi3.schemas import ObjectsDTSchema; print(ObjectsDTSchema)"
 python -m pytest --version
 claude --version
 test "$(git -C /testbed rev-parse HEAD)" = "2ef34c3213eb292703e0e5e6f2185b1e4725bbde"
