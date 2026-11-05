@@ -110,7 +110,7 @@ def _logical_cp1_kv_tensor(tensor: Tensor, shard: SequenceShard) -> Tensor:
         )
     if shard.local_length == shard.global_length:
         return tensor
-    return tensor[:shard.global_length]
+    return tensor[: shard.global_length]
 
 
 def _concatenate_kv(entries: tuple[tuple[SequenceShard, Mapping[int, KVPair]], ...]) -> Mapping[int, KVPair]:
@@ -134,10 +134,7 @@ def _concatenate_kv(entries: tuple[tuple[SequenceShard, Mapping[int, KVPair]], .
         {
             layer: tuple(
                 torch.cat(
-                    [
-                        _logical_cp1_kv_tensor(key_values[layer][index], shard)
-                        for shard, key_values in entries
-                    ],
+                    [_logical_cp1_kv_tensor(key_values[layer][index], shard) for shard, key_values in entries],
                     dim=0,
                 )
                 for index in (0, 1)

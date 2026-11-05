@@ -135,18 +135,10 @@ class TPRAttentionContext:
             if type(value) is not int or value < minimum:
                 raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}")
         if self.local_physical_suffix_length is not None:
-            if (
-                type(self.local_physical_suffix_length) is not int
-                or self.local_physical_suffix_length < 1
-            ):
+            if type(self.local_physical_suffix_length) is not int or self.local_physical_suffix_length < 1:
                 raise ValueError("local_physical_suffix_length must be a positive integer")
-            if (
-                self.attention_backend is None
-                and self.local_physical_suffix_length < self.suffix_length
-            ):
-                raise ValueError(
-                    "CP1 local physical suffix length cannot be shorter than its logical Segment"
-                )
+            if self.attention_backend is None and self.local_physical_suffix_length < self.suffix_length:
+                raise ValueError("CP1 local physical suffix length cannot be shorter than its logical Segment")
         if not isinstance(self.compact_new_kv, bool):
             raise TypeError("compact_new_kv must be a bool")
         if self.prefix_length == 0:
@@ -183,11 +175,7 @@ class TPRAttentionContext:
     def local_suffix_length(self) -> int:
         if self.attention_backend is not None:
             return self.attention_backend.local_suffix_length
-        return (
-            self.suffix_length
-            if self.local_physical_suffix_length is None
-            else self.local_physical_suffix_length
-        )
+        return self.suffix_length if self.local_physical_suffix_length is None else self.local_physical_suffix_length
 
     def new_collector(self) -> TPRAttentionContext:
         """Collect checkpoint K/V while sharing immutable prefix state.

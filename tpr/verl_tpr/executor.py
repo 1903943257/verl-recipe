@@ -227,11 +227,15 @@ def validate_replay_plan(
             continue
         if cp_size > 1:
             physical_length = make_ring_sequence_shard(
-                segment.length, cp_rank=0, cp_size=cp_size, sp_tp_size=tp_size,
+                segment.length,
+                cp_rank=0,
+                cp_size=cp_size,
+                sp_tp_size=tp_size,
             ).local_length
         else:
             physical_length = make_cp1_sp_sequence_shard(
-                segment.length, sp_tp_size=tp_size,
+                segment.length,
+                sp_tp_size=tp_size,
             ).local_length
         if physical_length % tp_size:
             raise ValueError(
@@ -305,9 +309,7 @@ class SegmentExecutor:
         self.cp_group = cp_group
         config = getattr(prepared_model.model, "config", None)
         self.sp_tp_size = (
-            getattr(config, "tensor_model_parallel_size", 1)
-            if getattr(config, "sequence_parallel", False)
-            else 1
+            getattr(config, "tensor_model_parallel_size", 1) if getattr(config, "sequence_parallel", False) else 1
         )
         if cp_group is None:
             if ring_runtime is not None:
@@ -521,9 +523,7 @@ class SegmentExecutor:
             ),
             attention_backend=attention_backend,
             compact_new_kv=no_grad,
-            local_physical_suffix_length=(
-                shard.local_length if not self.cp_enabled and self.sp_tp_size > 1 else None
-            ),
+            local_physical_suffix_length=(shard.local_length if not self.cp_enabled and self.sp_tp_size > 1 else None),
         )
         rope_context = (
             disable_bound_context_parallel_sharding(self.model.rotary_pos_emb) if self.cp_enabled else nullcontext()

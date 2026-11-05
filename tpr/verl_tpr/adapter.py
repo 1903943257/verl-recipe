@@ -379,7 +379,8 @@ def run_tpr_forward_backward_batch(
             shard_for_segment = lambda segment: cp_runtime.ring.make_sequence_shard(segment.length)
         elif sp_tp_size > 1:
             shard_for_segment = lambda segment: make_cp1_sp_sequence_shard(
-                segment.length, sp_tp_size=sp_tp_size,
+                segment.length,
+                sp_tp_size=sp_tp_size,
             )
         else:
             shard_for_segment = None
@@ -408,10 +409,7 @@ def run_tpr_forward_backward_batch(
         run_one_tree,
         lambda: finalize(engine.module, None, force_all_reduce=True),
         no_sync_func,
-        empty_loss=(
-            torch.zeros((), device=prepared_model.device, dtype=torch.float32)
-            if empty_local_forest else None
-        ),
+        empty_loss=(torch.zeros((), device=prepared_model.device, dtype=torch.float32) if empty_local_forest else None),
     )
     if not bool(torch.isfinite(loss).item()):
         raise FloatingPointError("non-finite TPR PPO mini-batch loss")

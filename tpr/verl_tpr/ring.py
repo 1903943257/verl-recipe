@@ -35,7 +35,6 @@ from .ring_layout import (
     _prepare_ring_layout,
     _RingStaticLayout,
     make_ring_sequence_shard,
-    make_cp1_sp_sequence_shard,
     resolve_cp_group,
 )
 
@@ -280,7 +279,10 @@ def resolve_engine_cp_runtime(engine: Any, model_config: Any) -> TPREngineCPRunt
     return TPREngineCPRuntime(
         group=group,
         ring=RingCPBackend(
-            group, parallel_size=size, parallel_rank=rank, sp_tp_size=sp_tp_size,
+            group,
+            parallel_size=size,
+            parallel_rank=rank,
+            sp_tp_size=sp_tp_size,
         ),
         size=size,
         rank=rank,

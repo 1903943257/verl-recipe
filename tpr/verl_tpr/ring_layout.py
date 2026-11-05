@@ -341,8 +341,7 @@ def make_ring_sequence_shard(
         padded_length = round_up_sequence_length(global_length, alignment)
     if padded_length < global_length or padded_length % alignment != 0:
         raise ValueError(
-            f"padded_length must cover {global_length} and be divisible by {alignment}, "
-            f"got {padded_length}"
+            f"padded_length must cover {global_length} and be divisible by {alignment}, got {padded_length}"
         )
     chunk_length = padded_length // chunk_count
     first_start = cp_rank * chunk_length
