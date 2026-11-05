@@ -37,7 +37,8 @@ from verl.utils.metric import AggregationType, Metric
 from verl_tpr.attention import TPRSelfAttention
 
 from .executor import SegmentExecutor, prepare_replay_model, validate_replay_plan
-from .ring import aggregate_cp_loss, make_cp1_sp_sequence_shard, resolve_engine_cp_runtime
+from .ring import aggregate_cp_loss, resolve_engine_cp_runtime
+from .ring_layout import make_cp1_sp_sequence_shard
 from .tree import ForestExecutionPlan, TreeExecutionPlan, assert_tp_plan_agreement, digest_forest_plan
 
 if TYPE_CHECKING:

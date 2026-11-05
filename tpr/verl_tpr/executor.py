@@ -29,10 +29,10 @@ from verl_tpr.context import KVPair, TPRAttentionContext, use_tpr_attention_cont
 from .ring import (
     RingCPBackend,
     SequenceShard,
-    make_cp1_sp_sequence_shard,
     make_ring_sequence_shard,
     resolve_cp_group,
 )
+from .ring_layout import make_cp1_sp_sequence_shard
 from .state import KVStack, PastKVAnchors
 from .tree import SegmentId, SegmentPlan, SegmentSpec
 
