@@ -146,6 +146,7 @@ def _concatenate_kv(entries: tuple[tuple[SequenceShard, Mapping[int, KVPair]], .
         }
     )
 
+
 class KVPrefixState:
     """One segment's compact post-RoPE KV and delayed descendant gradients."""
 
