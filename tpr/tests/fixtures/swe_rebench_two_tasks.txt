@@ -1,0 +1,3 @@
+# Local two-task SWE-ReBench E2E smoke.
+ASPP__pelita-875
+Algebra8__pyopenapi3-83

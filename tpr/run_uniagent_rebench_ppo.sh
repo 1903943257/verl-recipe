@@ -21,7 +21,7 @@ if [[ -z "${UNIAGENT_ROOT:-}" ]]; then
 fi
 : "${UNIAGENT_ROOT:?Clone Uni-Agent beside the Recipe or set UNIAGENT_ROOT}"
 : "${MODEL_PATH:?Set MODEL_PATH to the local Qwen3 model directory}"
-TRAIN_FILE="${TRAIN_FILE:-${HOME}/data/tpr/swe_rebench_pelita875.parquet}"
+TRAIN_FILE="${TRAIN_FILE:-${HOME}/data/tpr/swe_rebench_filtered.parquet}"
 
 TASK_CONFIG="${TASK_CONFIG:-${SCRIPT_DIR}/task_config_swe_rebench_docker.yaml}"
 

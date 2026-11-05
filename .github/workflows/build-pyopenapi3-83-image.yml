@@ -1,0 +1,40 @@
+name: Build PyOpenAPI3-83 AMD64 sandbox image
+
+on:
+  push:
+    branches:
+      - fix/tpr-pr165-precommit-20261029
+    paths:
+      - "tpr/docker/pyopenapi3-83/**"
+      - ".github/workflows/build-pyopenapi3-83-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and validate image
+        run: |
+          bash tpr/docker/pyopenapi3-83/build.sh
+          mkdir -p "$RUNNER_TEMP/pyopenapi3-image"
+          docker save tpr-pyopenapi3-83-claude:2.1.308 | gzip -1 \
+            > "$RUNNER_TEMP/pyopenapi3-image/tpr-pyopenapi3-83-claude-amd64.tar.gz"
+          (
+            cd "$RUNNER_TEMP/pyopenapi3-image"
+            sha256sum tpr-pyopenapi3-83-claude-amd64.tar.gz > SHA256SUMS
+          )
+
+      - name: Upload image archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpr-pyopenapi3-83-claude-amd64
+          path: ${{ runner.temp }}/pyopenapi3-image/*
+          if-no-files-found: error
+          retention-days: 7

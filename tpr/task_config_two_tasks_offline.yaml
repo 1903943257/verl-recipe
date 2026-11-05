@@ -1,0 +1,34 @@
+# Local AMD64 two-task sandbox config.
+# The PPO training container needs Docker CLI plus access to a trusted host Docker daemon.
+# Both mapped images must already exist in that host Docker daemon.
+- name: swe_rebench
+  sandbox:
+    provider: docker
+    runtime_timeout: 7200
+    image_map:
+      - from: swerebench/sweb.eval.x86_64.aspp_1776_pelita-875
+        to: tpr-pelita875-claude:2.1.308
+      - from: swerebench/sweb.eval.x86_64.algebra8_1776_pyopenapi3-83
+        to: tpr-pyopenapi3-83-claude:2.1.308
+    sandbox_kwargs:
+      pull_policy: never
+      pull_timeout: 1200
+      start_timeout: 120
+      run_args:
+        - --platform=linux/amd64
+  agent:
+    name: claude_code
+    max_turns: 100
+    run_timeout: 3600
+    extra_env:
+      DISABLE_AUTO_COMPACT: "1"
+  prompt_template:
+    - role: user
+      content: |-
+        Read the following task description and resolve the issue in the current directory.
+
+        Task description:
+        {problem_statement}
+
+        Inspect the code, make minimal correct changes, and verify them.
+        Do not modify tests or commit changes. Summarize the result.
