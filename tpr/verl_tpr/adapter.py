@@ -37,7 +37,7 @@ from verl.utils.metric import AggregationType, Metric
 from verl_tpr.attention import TPRSelfAttention
 
 from .executor import SegmentExecutor, prepare_replay_model, validate_replay_plan
-from .ring import aggregate_cp_loss, resolve_engine_cp_runtime
+from .ring import aggregate_cp_loss, make_cp1_sp_sequence_shard, resolve_engine_cp_runtime
 from .tree import ForestExecutionPlan, TreeExecutionPlan, assert_tp_plan_agreement, digest_forest_plan
 
 if TYPE_CHECKING:
@@ -49,8 +49,15 @@ def run_forest(
     run_tree: Callable[[TreeExecutionPlan], Tensor],
     finalize_gradients: Callable[[], None],
     no_sync_context: Callable[[], Any] | None = None,
+    *,
+    empty_loss: Tensor | None = None,
 ) -> Tensor:
-    """Run all trees under one native no-sync scope and finalize once."""
+    """Run all trees and finalize once, including an empty DP replica.
+
+    The empty_loss argument is opt-in: only a replica with zero local supervised
+    tokens and a positive GLOBAL PPO denominator may skip local backward.
+    Megatron's already-zeroed main-grad buffers still join forced DP sync.
+    """
     if not forest.trees:
         raise ValueError("forest must contain at least one executable tree")
     total = None
@@ -65,8 +72,12 @@ def run_forest(
                 raise TypeError("run_tree must return a scalar Tensor")
             total = loss.detach() if total is None else total + loss.detach()
     if total is None:
-        raise ValueError("forest has no supervised logical response tokens")
-    # A failed tree never reaches native gradient finalization.
+        if empty_loss is None:
+            raise ValueError("forest has no supervised logical response tokens")
+        if not isinstance(empty_loss, Tensor) or empty_loss.numel() != 1 or empty_loss.requires_grad:
+            raise TypeError("empty_loss must be a detached scalar Tensor")
+        total = empty_loss
+    # Even a zero-local-loss DP replica joins native gradient synchronization.
     finalize_gradients()
     return total
 
@@ -315,11 +326,14 @@ def run_tpr_forward_backward_batch(
 
     keys = _trajectory_keys_from_minibatch(data)
     forest = build_tree_execution_plans(keys, data)
-    if not forest.trees or not forest.logical_loss_tokens:
-        raise ValueError("TPR PPO mini-batch has no supervised response tokens")
+    if not forest.trees:
+        raise ValueError("TPR PPO mini-batch has no trajectory trees")
+    # A locally unsupervised forest is legal if a different DP replica has loss.
+    # The Engine has already checked the positive GLOBAL denominator above.
+    empty_local_forest = forest.logical_loss_tokens == 0
     if tp_size * sizes["CP"] > 1:
         assert_tp_plan_agreement(digest_forest_plan(forest), tp_size=tp_size, cp_size=sizes["CP"])
-    cp_runtime = resolve_engine_cp_runtime(engine)
+    cp_runtime = resolve_engine_cp_runtime(engine, config)
     # Reject unsupported physical shapes for the whole forest before any
     # forward/backward can leave the mini-batch with partial gradients.
     for tree_plan in forest.trees:
@@ -360,9 +374,15 @@ def run_tpr_forward_backward_batch(
     metrics = _PPOMetrics()
 
     def run_one_tree(tree_plan):
-        shard_for_segment = (
-            None if cp_runtime.ring is None else lambda segment: cp_runtime.ring.make_sequence_shard(segment.length)
-        )
+        sp_tp_size = tp_size if getattr(config, "sequence_parallel", False) else 1
+        if cp_runtime.ring is not None:
+            shard_for_segment = lambda segment: cp_runtime.ring.make_sequence_shard(segment.length)
+        elif sp_tp_size > 1:
+            shard_for_segment = lambda segment: make_cp1_sp_sequence_shard(
+                segment.length, sp_tp_size=sp_tp_size,
+            )
+        else:
+            shard_for_segment = None
         callback, counts = objective.bind_tree(tree_plan, shard_for_segment=shard_for_segment)
         executor = SegmentExecutor(
             model,
@@ -388,6 +408,10 @@ def run_tpr_forward_backward_batch(
         run_one_tree,
         lambda: finalize(engine.module, None, force_all_reduce=True),
         no_sync_func,
+        empty_loss=(
+            torch.zeros((), device=prepared_model.device, dtype=torch.float32)
+            if empty_local_forest else None
+        ),
     )
     if not bool(torch.isfinite(loss).item()):
         raise FloatingPointError("non-finite TPR PPO mini-batch loss")
