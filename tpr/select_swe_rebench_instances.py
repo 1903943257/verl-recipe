@@ -83,7 +83,9 @@ def main() -> None:
                 )
             positions[instance_id] = index
 
-    missing = [instance_id for instance_id in instance_ids if instance_id not in positions]
+    missing = [
+        instance_id for instance_id in instance_ids if instance_id not in positions
+    ]
     if missing:
         raise ValueError(f"instance IDs not found in input Parquet: {missing}")
 
@@ -91,10 +93,16 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     selected.to_parquet(str(args.output))
 
-    print(f"Wrote {len(selected)} selected instances to {args.output.resolve()}", flush=True)
+    print(
+        f"Wrote {len(selected)} selected instances to {args.output.resolve()}",
+        flush=True,
+    )
     for row in selected:
         task = row["extra_info"]["tools_kwargs"]["task"]
-        print(f"  {task['metadata']['instance_id']}: {task['sandbox']['image']}", flush=True)
+        print(
+            f"  {task['metadata']['instance_id']}: {task['sandbox']['image']}",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":
