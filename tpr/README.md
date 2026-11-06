@@ -53,7 +53,8 @@ export DATA_DIR="$HOME/data/tpr"
 mkdir -p "$DATA_DIR"
 
 # Use the Uni-Agent revision pinned by this Recipe.
-git -C "$UNIAGENT_ROOT" checkout d7415466
+git -C "$UNIAGENT_ROOT" fetch origin
+git -C "$UNIAGENT_ROOT" checkout d7415466c9b4b3ff7f59a3298ee3e0f5e1297a2f
 
 # Run the official dataset conversion.
 cd "$UNIAGENT_ROOT"
