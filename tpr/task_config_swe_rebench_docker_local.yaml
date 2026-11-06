@@ -1,4 +1,4 @@
-# Local AMD64 two-task sandbox config.
+# Local AMD64 two-task sandbox config for offline smoke tests.
 # The PPO training container needs Docker CLI plus access to a trusted host Docker daemon.
 # Both mapped images must already exist in that host Docker daemon.
 - name: swe_rebench

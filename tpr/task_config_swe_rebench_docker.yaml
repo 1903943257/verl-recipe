@@ -1,5 +1,6 @@
-# Uni-Agent Docker sandbox. The PPO training container needs Docker CLI
-# configured for sandbox startup.
+# Public Docker sandbox configuration.
+# Uni-Agent's official SWE-ReBench preprocessing supplies each task's public image.
+# ClaudeCodeAgent installs Claude Code in the sandbox when it is not already available.
 - name: swe_rebench
   sandbox:
     provider: docker
