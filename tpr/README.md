@@ -1,63 +1,96 @@
-# Tree Prefix Reuse (TPR)
+# Tree Prefix Reuse (TPR) for VERL Megatron Actor
 
-TPR reuses shared prefixes across agent trajectories during VERL Megatron Actor training. See [RFC #7561](https://github.com/verl-project/verl/issues/7561).
+TPR is a **pluggable training execution path within VERL's Megatron Actor**.
+It builds a token-LCP Forest from a logical RL mini-batch and reuses shared
+prefix computation across trajectories during Actor forward/backward.
 
-## Required versions
+It is **not** an Agent Framework, a rollout backend, or an independent
+replacement for Megatron. Uni-Agent is our demonstrated Agentic RL producer,
+but the TPR runtime does not depend on Uni-Agent.
 
-- VERL and Uni-Agent revisions are pinned in [`REQUIRED_VERL.txt`](REQUIRED_VERL.txt).
-- The example uses an Ascend NPU environment with Megatron-Core, MindSpeed, Ray, vLLM-Ascend and Megatron-Bridge. It assumes eight NPUs.
-- The SWE-ReBench example uses Uni-Agent's Docker sandbox. The PPO training container needs Docker CLI access to a trusted host Docker daemon.
-- The public task images use `linux/amd64`. Network access is required to pull missing task images and, when needed, install Claude Code in the sandbox.
+See [RFC #7561](https://github.com/verl-project/verl/issues/7561).
 
-## Quick Start
+## Quick Start: use TPR in your existing VERL training
 
-This example assumes you already have a VERL checkout. Install the pinned Uni-Agent revision and prepare a local Qwen3-4B checkpoint.
-
-Set the paths to your existing checkouts and model:
+Prerequisites: the pinned VERL checkout in
+[REQUIRED_VERL.txt](REQUIRED_VERL.txt), compatible Megatron/Ascend dependencies,
+and a supported dense model with PP=EP=VPP=1.
 
 ```bash
 export VERL_ROOT=/path/to/verl
 export RECIPE_ROOT=/path/to/verl-recipe
-export UNIAGENT_ROOT=/path/to/uni-agent
-export MODEL_PATH=/path/to/Qwen3-4B
-```
 
-Apply the TPR patch to a clean VERL checkout:
-
-```bash
+# Current VERL integration is a small source patch; apply exactly once.
 git -C "$VERL_ROOT" apply --check "$RECIPE_ROOT/tpr/verl-tpr.patch"
 git -C "$VERL_ROOT" apply "$RECIPE_ROOT/tpr/verl-tpr.patch"
+
+# Make the runtime importable where the Actor workers execute.
+python -m pip install --no-deps -e "$RECIPE_ROOT/tpr"
 ```
 
-Apply the patch only once.
-
-## Prepare SWE-ReBench data
-
-Use Uni-Agent's official preprocessing command. It loads the public `nebius/SWE-rebench` `filtered` split, converts it to Uni-Agent's native Task Config schema, and writes the Parquet file with the per-instance public task image references:
+Then add **one** argument to the existing VERL Megatron training command:
 
 ```bash
-export DATA_DIR="$HOME/data/tpr"
-mkdir -p "$DATA_DIR"
++actor_rollout_ref.actor.megatron.tpr_enabled=True \
+```
+
+For Ray multi-node jobs, package/install the same TPR wheel into every
+worker's effective Python environment (including an isolated `runtime_env`).
+**Verify worker imports before training.** Full installation, Ray check,
+supported data contract and configuration boundaries:
+[INTEGRATION.md](INTEGRATION.md).
+
+## Use with Uni-Agent (optional Agentic RL example)
+
+Reuse Uni-Agent's own training workflow: dataset preprocessing, Ray Job
+submission, Gateway, Task Runner, Reward and Sandbox stay unchanged.
+For the pinned `examples/claude_code_swe_task/run_train.sh`, an optional
+[one-line patch](examples/uniagent/enable_tpr.patch) adds the TPR flag.
+Read [integration instructions](INTEGRATION.md#5-uni-agent-retain-the-official-workflow)
+first: the upstream script defaults to unsupported PP2 and uses a model
+not included in our validation set.
+
+We also retain a **self-contained SWE-ReBench reference run**:
+
+```bash
+export UNIAGENT_ROOT=/path/to/uni-agent
+export MODEL_PATH=/path/to/Qwen3-4B
+export TRAIN_FILE=$HOME/data/tpr/swe_rebench_filtered.parquet
+
+# Standard Uni-Agent dataset preprocessing (run in a networked environment):
 python -m uni_agent.tasks.swe_rebench.preprocess \
-  --local-save-dir "$DATA_DIR"
-export TRAIN_FILE="$DATA_DIR/swe_rebench_filtered.parquet"
-```
+  --local-save-dir "$HOME/data/tpr"
 
-For a small prefix smoke, use the upstream `--max-instances` option and a separate output directory:
-
-```bash
-python -m uni_agent.tasks.swe_rebench.preprocess \
-  --local-save-dir "$HOME/data/tpr/smoke" \
-  --max-instances 2
-```
-
-No Recipe-owned dataset converter is required. The public task configuration is [`task_config_swe_rebench_docker.yaml`](task_config_swe_rebench_docker.yaml); each row supplies its own task image, so the YAML does not enumerate task IDs or define an `image_map`.
-
-## Start training
-
-```bash
+# Optional reference launcher; unlike the official Uni-Agent entry point,
+# this script launches the VERL Python module directly:
 export TPR_ENABLED=True
 bash "$RECIPE_ROOT/tpr/run_uniagent_rebench_ppo.sh"
 ```
 
-The example runs 10 training steps by default. Set `TPR_ENABLED=False` to use the original Full training path. Logs are saved under `$VERL_ROOT/outputs/tpr/`.
+This reference uses
+[task_config_swe_rebench_docker.yaml](task_config_swe_rebench_docker.yaml),
+which relies on network access to pull public `linux/amd64` task images
+and install Claude Code if missing, plus Docker CLI/daemon access.
+The original Full route can be selected with `TPR_ENABLED=False`.
+Its launch defaults use eight NPUs and 10 steps and are adjustable via
+the script's environment variables.
+
+## Scope and evidence
+
+| Dimension | Current support |
+| --- | --- |
+| Integration | VERL V1 Megatron Actor (pinned commit + Engine patch) |
+| Model | Dense causal SelfAttention; Qwen3-4B family tested |
+| Parallelism | TP/CP/DP; SP including CP1 physical padding; PP=EP=VPP=1 |
+| Training | Vanilla token-mean PPO Actor; Tree built per DP-local mini-batch |
+| Recompute | Off or TPR-aware full/uniform/1 |
+| Not supported / validated | MoE, MTP, router replay, PP>1, EP>1, nonzero dropout, sliding window, FP8/FP4, dynamic CP, activation offload |
+
+**Observed in local E2E:** TP2×DP2 CP1/SP run completed;
+CP1 SP physical padding occurred (logical 6481 → physical 6482);
+TP2×CP2 DP1 ran with 8 trajectories from 2 UIDs in one Tree,
+9 physical segments and 2.826× topology token reuse.
+
+**Not yet claimed as verified:** clean public installation via a Ray
+`runtime_env` and public Docker/Claude Code image path. The complete
+official-flow release gate is in [INTEGRATION.md](INTEGRATION.md#6-honest-public-validation-boundary).

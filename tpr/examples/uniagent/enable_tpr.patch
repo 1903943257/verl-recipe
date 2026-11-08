@@ -1,0 +1,8 @@
+diff --git a/examples/claude_code_swe_task/run_train.sh b/examples/claude_code_swe_task/run_train.sh
+--- a/examples/claude_code_swe_task/run_train.sh
++++ b/examples/claude_code_swe_task/run_train.sh
+@@ -176,3 +176,4 @@
+     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size="${train_pp}" \
+     actor_rollout_ref.actor.megatron.context_parallel_size="${train_cp}" \
++    +actor_rollout_ref.actor.megatron.tpr_enabled=True \
+     actor_rollout_ref.actor.megatron.use_remove_padding=False \
