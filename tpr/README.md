@@ -34,20 +34,20 @@ Then add **one** argument to the existing VERL Megatron training command:
 +actor_rollout_ref.actor.megatron.tpr_enabled=True \
 ```
 
-For Ray multi-node jobs, package/install the same TPR wheel into every
-worker's effective Python environment (including an isolated `runtime_env`).
-**Verify worker imports before training.** Full installation, Ray check,
-supported data contract and configuration boundaries:
+For Ray jobs, ensure the runtime is importable in the workers' Python
+environment (including any isolated `runtime_env`). Installation,
+one-off import validation, data contract and compatibility details are in
 [INTEGRATION.md](INTEGRATION.md).
 
 ## Use with Uni-Agent (optional Agentic RL example)
 
 Reuse Uni-Agent's own training workflow: dataset preprocessing, Ray Job
 submission, Gateway, Task Runner, Reward and Sandbox stay unchanged.
-For the pinned `examples/claude_code_swe_task/run_train.sh`, an optional
-[one-line patch](examples/uniagent/enable_tpr.patch) adds the TPR flag.
-Read [integration instructions](INTEGRATION.md#5-uni-agent-retain-the-official-workflow)
-first: the upstream script defaults to unsupported PP2 and uses a model
+For an existing `run_train.sh`, add the single `tpr_enabled=True`
+Hydra argument to its Megatron Actor configuration; **no Uni-Agent patch
+or replacement launcher is required**. Read
+[integration instructions](INTEGRATION.md#5-uni-agent-retain-the-official-workflow)
+first: the upstream example defaults to unsupported PP2 and uses a model
 not included in our validation set.
 
 We also retain a **self-contained SWE-ReBench reference run**:
