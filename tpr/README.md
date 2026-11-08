@@ -63,18 +63,25 @@ within the same DP-local Actor mini-batch.
 ## 3. Reproduce with Uni-Agent's *original* launch structure
 
 The reference [examples/uniagent/run_train.sh](examples/uniagent/run_train.sh)
-is copied from the pinned upstream
+follows the pinned upstream
 [Uni-Agent Claude Code SWE trainer](https://github.com/verl-project/uni-agent/blob/d7415466c9b4b3ff7f59a3298ee3e0f5e1297a2f/examples/claude_code_swe_task/run_train.sh).
+Upstream Uni-Agent is unchanged. The copied launcher preserves the official
+`ray job submit --runtime-env`, V1 colocate-async Trainer, Gateway, Agent
+Framework, Task Runner, PPO, and Reward wiring. TPR adds the Megatron Actor
+`tpr_enabled` switch and the verified Ascend Actor settings (PP1, SP=True,
+remove-padding, recompute). The pinned VERL-specific TQ capacity is explicit.
 
-The upstream source is **not modified**. The copied example keeps the official
-`ray job submit --runtime-env`, V1 Trainer, Gateway, Agent Framework,
-Task Runner, PPO and Reward wiring. Its differences are deliberately limited
-to TPR enablement, supported PP=1, SP=True, remove-padding=True and an
-environment-variable override for `FILTER_GROUPS_ENABLE`. Model/dataset/task
-paths and the remaining training options are inherited from Uni-Agent and
-should be supplied for your environment.
+**Default example (proposed eight-NPU smoke):** one node, TP2 × CP2 × DP2,
+PP1, SP=True, Qwen3-4B, two prompts × four sessions, one training step.
+The launcher uses conservative Ascend vLLM settings: eager execution, no
+forced `mamba_cache_mode=align` or Graph capture. Group filtering and warmup
+generation are disabled, since async ReplayBuffer refills failed prompt groups
+even with filtering off. These are example defaults and remain overridable
+with the corresponding environment variables; they do **not** establish
+eight-NPU E2E validation.
 
-For a one-step 4-NPU smoke with a **known-good local dataset and task config**:
+Supply an existing working Ray runtime environment, two-prompt training data,
+a model directory and a Docker sandbox TaskConfig:
 
 ```bash
 export RECIPE_ROOT=/path/to/verl-recipe
@@ -82,51 +89,54 @@ export UNIAGENT_ROOT=/path/to/uni-agent
 export DATA_DIR=/path/to/shared/data
 export RUNTIME_DIR=/path/to/shared/runtime
 export RUNTIME_ENV=/path/to/your/working_runtime_env.yaml
-export MODEL_PATH=/path/to/Qwen3-4B-128K
+export MODEL_PATH=/path/to/Qwen3-4B
 export TRAIN_FILE=/path/to/your/two_task.parquet
 export TEST_FILE="$TRAIN_FILE"
 export TASK_CONFIG=/path/to/your/known_good_task_config.yaml
 
-export NNODES=1 NGPUS_PER_NODE=4
+# Pin these explicitly if reusing a shell previously configured for four NPUs.
+export NNODES=1 NGPUS_PER_NODE=8
 export TRAIN_TP=2 TRAIN_CP=2 TRAIN_PP=1
 export TRAIN_PROMPT_BSZ=2 PPO_MINI_BATCH_SIZE=2 N_RESP_PER_PROMPT=4
-export TRAJECTORY_SELECTION=all FILTER_GROUPS_ENABLE=False
-export GATEWAY_COUNT=1 NUM_AGENT_WORKERS=1 CONCURRENCY=8
-export TOOL_PARSER=hermes
-export MAX_PROMPT_LENGTH=16384 MAX_RESPONSE_LENGTH=16384
-export TOTAL_TRAINING_STEPS=1 TOTAL_EPOCHS=1
-export SAVE_FREQ=-1 TEST_FREQ=-1
+export NUM_WARMUP_BATCHES=0 FILTER_GROUPS_ENABLE=False
 export TPR_ENABLED=True
 
-# Important: do not export the historically problematic Ray visibility override.
-unset RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES
+# Keep each run's session logs separate, even if AGENT_LOG_DIR was exported earlier.
+export EXP_NAME="tpr-8npu-$(date +%Y%m%d_%H%M%S)"
+export AGENT_LOG_DIR="$RUNTIME_DIR/logs/tpr-uniagent-rebench/$EXP_NAME"
 
-# Uni-Agent's original script requires execution from the Uni-Agent repo root.
+# Check that Ray actually advertises eight NPUs before submitting.
+ray status
+
+# Must launch from the Uni-Agent repository root.
 cd "$UNIAGENT_ROOT"
 bash "$RECIPE_ROOT/tpr/examples/uniagent/run_train.sh"
 ```
 
-Because the official launcher uses `ray job submit --no-wait`, success of the
-submission command does **not** mean training succeeded. Follow the Ray Job
-logs until the actual Actor update finishes. Worker imports, Ray cluster
-configuration and sandbox image availability must be valid; this official-flow
-example is **not yet confirmed E2E**. Using the known-good local two-task
-Docker workflow tests the official Ray submission path but **does not validate
-the separate public networked Docker/Claude Code download path**.
+The script submits with `--no-wait`; a successful submission is not proof of
+successful training. Follow the Job logs for `training/global_step=1` and
+`actor/tpr/` metrics. For two prompts and DP2, each DP-local Actor mini-batch
+may contain trajectories from only one prompt; TPR never shares prefixes
+across DP ranks. The example tests TP/CP/DP integration, not cross-DP reuse.
 
 The original [run_uniagent_rebench_ppo.sh](run_uniagent_rebench_ppo.sh)
-remains unchanged as a historical direct-launch baseline. It contains a
-Ray NPU visibility override that caused a device-ID error in one local
-environment; do not use that script for this official-flow verification.
+remains an unchanged historical direct-launch baseline. The public remote
+Docker/Claude Code installation flow is a separate validation target.
 
 ## 4. Validation status
 
-- **Observed locally:** TP2×DP2 CP1/SP E2E, actual CP1 SP padding
-  (logical 6481 → physical 6482), and TP2×CP2 DP1 E2E with eight
-  trajectories/two UIDs in one Tree (nine segments, reuse factor ≈2.826).
-- **Pending:** official `ray job submit` + TPR wheel/worker import path;
-  public remote Docker task images and Claude Code installation; a matched
-  Full-vs-TPR run using the copied upstream launcher.
+- **E2E confirmed (2026-11-08, four Ascend NPUs):** official Uni-Agent
+  `ray job submit` flow, Qwen3-4B, TP2 × CP2 × DP1 / SP=True;
+  `training/global_step=1`, Actor update, and Ray Job `succeeded`.
+  Actor metrics: `forest_trees=1`, `physical_segments=9`,
+  `logical_input_tokens=142190`, `unique_tree_tokens=33928`,
+  `topology_token_reuse_ratio=4.19093`. The ratio describes token reuse,
+  **not** training speedup.
+- **Previously validated:** TP2 × DP2 / CP1-SP E2E, and CP/SP physical
+  padding correctness in dedicated tests.
+- **Pending:** official-flow eight-NPU TP2 × CP2 × DP2 E2E; public
+  remote-sandbox Docker/Claude Code setup; matched Full-vs-TPR performance
+  and correctness under the copied upstream launcher.
 
-After validating, the only TPR-specific integration API for a supported VERL
-Megatron Actor remains the `tpr_enabled` flag.
+After validation, the only TPR-specific integration API for a supported VERL
+Megatron Actor remains `tpr_enabled`.
