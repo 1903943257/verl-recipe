@@ -1,12 +1,20 @@
 # Tree Prefix Reuse (TPR)
 
-Design discussion: [VERL RFC #7561](https://github.com/verl-project/verl/issues/7561).
+TPR reuses shared token prefixes across trajectories during VERL V1 Megatron Actor training. See [VERL RFC #7561](https://github.com/verl-project/verl/issues/7561).
 
-TPR reuses common token prefixes across trajectories within a DP-local VERL V1 Megatron Actor mini-batch, reducing redundant attention computation without changing the existing rollout, reward, or dataset pipeline.
+## Required `verl` version
+
+See [`REQUIRED_VERL.txt`](REQUIRED_VERL.txt) for the compatible VERL and Uni-Agent revisions.
+
+## Requirements
+
+- A working VERL V1 Megatron Actor environment with Megatron-Core and an Ascend NPU training stack.
+- For the SWE example, follow the [Uni-Agent project](https://github.com/verl-project/uni-agent), [installation guide](https://uni-agent.readthedocs.io/en/latest/quickstart/installation.html), and [RL training guide](https://uni-agent.readthedocs.io/en/latest/quickstart/rl-training.html). Prepare the model, data, sandbox, and Ray environment as in Uni-Agent.
+- Install the TPR package and patched VERL code in the Megatron Actor worker environment.
 
 ## Quick Start
 
-Requires a working VERL V1 Megatron Actor environment. Use the compatible VERL revision specified in [REQUIRED_VERL.txt](REQUIRED_VERL.txt).
+Apply the patch to the compatible VERL checkout and install TPR:
 
 ```bash
 export VERL_ROOT=/path/to/verl
@@ -17,28 +25,20 @@ git -C "$VERL_ROOT" apply "$RECIPE_ROOT/tpr/verl-tpr.patch"
 python -m pip install --no-deps --no-build-isolation -e "$RECIPE_ROOT/tpr"
 ```
 
-Enable TPR in your existing Megatron Actor training launcher:
+Enable TPR in the existing Megatron Actor launcher:
 
 ```bash
 +actor_rollout_ref.actor.megatron.tpr_enabled=True \
 ```
 
-Set the option to `False` to use the native Full training path.
-
-## Example: Uni-Agent SWE
-
-For a complete Uni-Agent setup, see the [Uni-Agent project](https://github.com/verl-project/uni-agent), its [installation guide](https://uni-agent.readthedocs.io/en/latest/quickstart/installation.html), and the [Agent RL training guide](https://uni-agent.readthedocs.io/en/latest/quickstart/rl-training.html). The [Claude Code SWE example](https://github.com/verl-project/uni-agent/tree/d7415466c9b4b3ff7f59a3298ee3e0f5e1297a2f/examples/claude_code_swe_task) covers the corresponding agent setup.
-
-With the model, datasets, Sandbox and Ray environment prepared as in Uni-Agent, run:
+Set to `False` for native Full training. To run the included Uni-Agent SWE example with the prepared Uni-Agent environment:
 
 ```bash
-bash tpr/run_train.sh
+bash "$RECIPE_ROOT/tpr/run_train.sh"
 ```
 
-The launcher follows Uni-Agent's model, data and runtime directory conventions. This TPR example defaults to Qwen3-4B on 8 Ascend NPUs (TP2 × CP2 × DP2, SP enabled).
+## Support
 
-## Scope
+**Supported:** Dense causal full-attention (softmax attention) models using the compatible Megatron-Core attention path, including Qwen3-4B; TP, DP, CP, and SP; full recomputation (`uniform/full/1`).
 
-**Validated:** Qwen3-4B, dense causal softmax attention, supported TP/CP/DP/SP combinations, PP=EP=VPP=1, vanilla token-mean PPO, zero attention dropout, and full recomputation (`uniform/full/1`).
-
-**Not validated:** MoE, MTP, router replay, PP>1, sliding-window attention, FP8/FP4, dynamic CP, linear attention models, and hybrid linear-attention architectures.
+**Not supported:** Pipeline parallelism (PP > 1), expert parallelism (EP > 1), MoE models, linear attention models, and hybrid linear-attention architectures.
