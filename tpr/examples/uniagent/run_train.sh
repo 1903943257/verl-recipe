@@ -120,6 +120,7 @@ ray job submit --no-wait --runtime-env $RUNTIME_ENV \
     trainer.v1.trainer_mode=colocate_async \
     trainer.v1.colocate_async.num_warmup_batches="${num_warmup_batches}" \
     transfer_queue.enable=True \
+    transfer_queue.backend.SimpleStorage.total_storage_size=100000 \
     trainer.device=npu \
     actor_rollout_ref.nccl_timeout=9600 \
     actor_rollout_ref.hybrid_engine=True \
