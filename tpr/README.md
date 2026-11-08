@@ -39,6 +39,6 @@ bash "$RECIPE_ROOT/tpr/run_train.sh"
 
 ## Support
 
-**Supported:** Dense causal full-attention (softmax attention) models using the compatible Megatron-Core attention path, including Qwen3-4B; TP, DP, CP, and SP; full recomputation (`uniform/full/1`).
+**Supported:** Dense causal full-attention (softmax attention) models using the compatible Megatron-Core attention path; TP, DP, CP, and SP; full recomputation (`uniform/full/1`).
 
 **Not supported:** Pipeline parallelism (PP > 1), expert parallelism (EP > 1), MoE models, linear attention models, and hybrid linear-attention architectures.
