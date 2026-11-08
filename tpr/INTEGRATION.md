@@ -141,6 +141,37 @@ Hydra argument. It does not change the agent, dataset, task, gateway, reward,
 scheduler, or sandbox logic. To revert, use `git -C "$UNIAGENT_ROOT"
 apply -R "$RECIPE_ROOT/tpr/examples/uniagent/enable_tpr.patch"`.
 
+A proposed **one-step public integration smoke** using the *same* Uni-Agent
+launcher (not a separate TPR training process) is:
+
+```bash
+export RECIPE_ROOT=/path/to/verl-recipe
+export UNIAGENT_ROOT=/path/to/uni-agent
+export DATA_DIR=/path/to/shared/data
+export RUNTIME_DIR=/path/to/shared/runtime
+export RUNTIME_ENV=/path/to/your/working_ray_runtime_env.yaml
+export MODEL_PATH=/path/to/Qwen3-4B-128K
+export TRAIN_FILE="$DATA_DIR/swe_rebench_filtered.parquet"
+export TEST_FILE="$TRAIN_FILE"
+export TASK_CONFIG="$RECIPE_ROOT/tpr/task_config_swe_rebench_docker.yaml"
+
+export NNODES=1 NGPUS_PER_NODE=8
+export TRAIN_TP=2 TRAIN_CP=4 TRAIN_PP=1
+export TRAIN_PROMPT_BSZ=2 PPO_MINI_BATCH_SIZE=2 N_RESP_PER_PROMPT=4
+export TRAJECTORY_SELECTION=all
+export MAX_PROMPT_LENGTH=16384 MAX_RESPONSE_LENGTH=16384
+export TOOL_PARSER=hermes
+export TOTAL_TRAINING_STEPS=1
+
+# Upstream script submits through Ray Jobs and returns without waiting.
+(cd "$UNIAGENT_ROOT" && bash examples/claude_code_swe_task/run_train.sh)
+```
+
+Before submitting, ensure the original Uni-Agent runtime env contains
+`verl_tpr` on the workers and the chosen Docker sandbox has access to the
+required public image/Claude Code downloads. Use the Ray import check above.
+The command is **proposed for validation, not a claimed passing E2E run**.
+
 The official example's defaults are *not* all TPR-compatible:
 it defaults to PP2 and Qwen3.5-9B, which is not the model covered by our
 Qwen3-4B validation. Provide a compatible dense model and set `TRAIN_PP=1`;
