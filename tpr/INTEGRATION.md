@@ -44,19 +44,29 @@ versions are provisioned separately.
 
 ## 2. Validate import *through Ray*, before training
 
-After preparing your normal Ray runtime environment and starting the cluster:
+After preparing the usual Ray runtime environment and starting the cluster,
+run this **one-off worker import smoke** (no diagnostic module is installed
+as part of TPR):
 
 ```bash
-export RUNTIME_ENV=/path/to/your/uniagent-or-verl-runtime-env.yaml
+export RUNTIME_ENV=/path/to/your/working_ray_runtime_env.yaml
 
-ray job submit --runtime-env "$RUNTIME_ENV" -- \
-  python -m verl_tpr.check_ray_runtime
+ray job submit --runtime-env "$RUNTIME_ENV" -- python -c '
+import ray
+ray.init(address="auto")
+@ray.remote(num_cpus=0)
+def probe():
+    import verl_tpr
+    from verl_tpr.adapter import run_tpr_forward_backward_batch
+    return verl_tpr.__file__
+print("TPR_RAY_IMPORT_OK", ray.get(probe.remote()))
+'
 ```
 
-This probes the import and the Megatron adapter on every Ray node advertising
-GPU/NPU resources (falling back to alive nodes when none advertise accelerators).
-Look for `TPR_RAY_IMPORT_OK` records with the expected package path/version.
-This is a packaging/dependency check, **not** a training-correctness test.
+This checks one scheduled Ray worker, **not every worker on every node**.
+For a multi-node launch, repeat with node-affinity placement or verify that
+the same wheel/source tree is available to all worker environments.
+It does not establish training correctness.
 
 ## 3. Enable TPR in an existing Megatron Actor configuration
 
@@ -125,24 +135,19 @@ It runs the official **`ray job submit --runtime-env`** path, with the
 same Uni-Agent Gateway, Task Runner, Rollout, Reward and Sandbox components.
 
 The upstream shell script **does not forward arbitrary extra CLI arguments**
-to the remote Hydra process. To demonstrate the smallest possible change, we
-ship a one-line, reversible patch to that pinned script:
+to the remote Hydra process. If you use it directly, add the following one
+line next to the existing `actor_rollout_ref.actor.megatron.context_parallel_size`
+Hydra setting in **your own training script**:
 
 ```bash
-export UNIAGENT_ROOT=/path/to/uni-agent
-git -C "$UNIAGENT_ROOT" apply --check \
-  "$RECIPE_ROOT/tpr/examples/uniagent/enable_tpr.patch"
-git -C "$UNIAGENT_ROOT" apply \
-  "$RECIPE_ROOT/tpr/examples/uniagent/enable_tpr.patch"
+    +actor_rollout_ref.actor.megatron.tpr_enabled=True \
 ```
 
-It adds **only** the `+actor_rollout_ref.actor.megatron.tpr_enabled=True`
-Hydra argument. It does not change the agent, dataset, task, gateway, reward,
-scheduler, or sandbox logic. To revert, use `git -C "$UNIAGENT_ROOT"
-apply -R "$RECIPE_ROOT/tpr/examples/uniagent/enable_tpr.patch"`.
+No TPR patch, fork, or copy of Uni-Agent is shipped. Agent, rollout,
+dataset, task, gateway, reward, scheduling, and sandbox logic remain yours.
 
-A proposed **one-step public integration smoke** using the *same* Uni-Agent
-launcher (not a separate TPR training process) is:
+After the one-line configuration change above, a proposed **one-step public
+integration smoke** using the normal Uni-Agent launcher is:
 
 ```bash
 export RECIPE_ROOT=/path/to/verl-recipe
@@ -169,8 +174,9 @@ export TOTAL_TRAINING_STEPS=1
 
 Before submitting, ensure the original Uni-Agent runtime env contains
 `verl_tpr` on the workers and the chosen Docker sandbox has access to the
-required public image/Claude Code downloads. Use the Ray import check above.
-The command is **proposed for validation, not a claimed passing E2E run**.
+required public image/Claude Code downloads. Use the optional Ray worker import
+smoke above. The command is **proposed for validation, not a claimed passing
+E2E run**.
 
 The official example's defaults are *not* all TPR-compatible:
 it defaults to PP2 and Qwen3.5-9B, which is not the model covered by our
@@ -191,8 +197,8 @@ defaults are an **optional reference setup**, not a required installation step.
   CP1 SP physical padding observed with an odd-length segment.
 - **Not yet validated end-to-end:** clean networked public Docker images and
   Claude Code installation; official `ray job submit` plus packaged TPR wheel.
-- **Release gate:** run the Ray import probe, an official-flow Full step
-  (`tpr_enabled=False`), then a matched TPR step
+- **Release gate:** optionally smoke-test Ray worker import, run an official-flow
+  Full step (`tpr_enabled=False`), then a matched TPR step
   (`tpr_enabled=True`) with the same data/model/rollout/batches. Capture the
   exact VERL and Uni-Agent commits and the Wheel version.
 
