@@ -81,7 +81,6 @@ optimizer_offload_fraction="${OFFLOAD_FRACTION:-1.0}"
 actor_lr="${ACTOR_LR:-1e-6}"
 
 USE_MBRIDGE="${USE_MBRIDGE:-True}"
-VANILLA_MBRIDGE="${VANILLA_MBRIDGE:-False}"
 USE_DIST_CKPT="${USE_DIST_CKPT:-False}"
 PARAM_OFFLOAD="${PARAM_OFFLOAD:-True}"
 OPTIMIZER_OFFLOAD="${OPTIMIZER_OFFLOAD:-True}"
@@ -121,7 +120,6 @@ ray job submit --no-wait --runtime-env $RUNTIME_ENV \
     trainer.v1.trainer_mode=colocate_async \
     trainer.v1.colocate_async.num_warmup_batches="${num_warmup_batches}" \
     transfer_queue.enable=True \
-    transfer_queue.metrics.enabled=True \
     trainer.device=npu \
     actor_rollout_ref.nccl_timeout=9600 \
     actor_rollout_ref.hybrid_engine=True \
@@ -172,7 +170,6 @@ ray job submit --no-wait --runtime-env $RUNTIME_ENV \
     +actor_rollout_ref.actor.optim.override_optimizer_config.use_precision_aware_optimizer=True \
     +actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_cpu_offload=True \
     actor_rollout_ref.actor.megatron.use_mbridge="${USE_MBRIDGE}" \
-    actor_rollout_ref.actor.megatron.vanilla_mbridge="${VANILLA_MBRIDGE}" \
     actor_rollout_ref.actor.megatron.use_dist_checkpointing="${USE_DIST_CKPT}" \
     actor_rollout_ref.actor.megatron.param_offload="${PARAM_OFFLOAD}" \
     actor_rollout_ref.actor.megatron.optimizer_offload="${OPTIMIZER_OFFLOAD}" \
