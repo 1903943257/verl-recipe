@@ -4,7 +4,7 @@
 # TPR only changes Megatron Actor execution; upstream Uni-Agent stays untouched.
 set -xeuo pipefail
 
-project_name=${PROJECT_NAME:-"cc-yuanrong-qwen3p5-9b-grpo"}
+project_name=${PROJECT_NAME:-"tpr-uniagent-rebench"}
 exp_name=${EXP_NAME:-"swe_agent_$(date +%Y%m%d_%H%M)"}
 
 MODEL_PATH=${MODEL_PATH:-"${DATA_DIR}/models/Qwen3-4B"}
