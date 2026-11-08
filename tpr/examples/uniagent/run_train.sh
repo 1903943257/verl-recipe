@@ -7,7 +7,7 @@ set -xeuo pipefail
 project_name=${PROJECT_NAME:-"cc-yuanrong-qwen3p5-9b-grpo"}
 exp_name=${EXP_NAME:-"swe_agent_$(date +%Y%m%d_%H%M)"}
 
-MODEL_PATH=${MODEL_PATH:-"${DATA_DIR}/models/Qwen3.5-9B"}
+MODEL_PATH=${MODEL_PATH:-"${DATA_DIR}/models/Qwen3-4B"}
 TRAIN_FILE=${TRAIN_FILE:-"${DATA_DIR}/data/uni_agent/swe_rebench_filtered.parquet"}
 TEST_FILE=${TEST_FILE:-"${DATA_DIR}/data/uni_agent/swe_bench_verified.parquet"}
 
@@ -18,13 +18,13 @@ AGENT_LOG_DIR=${AGENT_LOG_DIR:-"${RUNTIME_DIR}/logs/${project_name}/${exp_name}"
 # Must be launched from the repository root so Ray packages both `verl/` and `uni_agent/`.
 # --- Agent-framework rollout (replaces the swe_agent agent-loop) --------------
 TASK_CONFIG="${TASK_CONFIG:-examples/claude_code_swe_task/task_config_claude_code_openyuanrong.yaml}"
-TOOL_PARSER="${TOOL_PARSER:-qwen3_coder}"
-GATEWAY_COUNT="${GATEWAY_COUNT:-8}"
-CONCURRENCY="${CONCURRENCY:-256}"
-NUM_AGENT_WORKERS="${NUM_AGENT_WORKERS:-32}"
+TOOL_PARSER="${TOOL_PARSER:-hermes}"
+GATEWAY_COUNT="${GATEWAY_COUNT:-1}"
+CONCURRENCY="${CONCURRENCY:-4}"
+NUM_AGENT_WORKERS="${NUM_AGENT_WORKERS:-1}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-$(basename "${MODEL_PATH}")}"
 MASK_UNFINISHED_EPISODE="${MASK_UNFINISHED_EPISODE:-False}"
-TRAJECTORY_SELECTION="${TRAJECTORY_SELECTION:-longest}"
+TRAJECTORY_SELECTION="${TRAJECTORY_SELECTION:-all}"
 
 rollout_mode="${ROLLOUT_MODE:-async}"
 rollout_name="${ROLLOUT_NAME:-vllm}"
@@ -54,28 +54,28 @@ rollout_rs="${ROLLOUT_RS:-null}"
 rollout_rs_threshold="${ROLLOUT_RS_THRESHOLD:-null}"
 
 # Sampling parameters.
-temperature="${TEMPERATURE:-1.0}"
-top_p="${TOP_P:-1.0}"
-top_k="${TOP_K:--1}"
+temperature="${TEMPERATURE:-0.6}"
+top_p="${TOP_P:-0.95}"
+top_k="${TOP_K:-20}"
 val_temperature="${VAL_TEMPERATURE:-1.0}"
 val_top_p="${VAL_TOP_P:-0.95}"
 val_top_k="${VAL_TOP_K:--1}"
 
 # Response-length parameters.
-max_prompt_length="${MAX_PROMPT_LENGTH:-8000}"
-max_response_length="${MAX_RESPONSE_LENGTH:-128000}"
+max_prompt_length="${MAX_PROMPT_LENGTH:-16384}"
+max_response_length="${MAX_RESPONSE_LENGTH:-16384}"
 max_model_len=$((max_prompt_length + max_response_length))
 max_num_batched_tokens=$((max_prompt_length + max_response_length))
 
-# Performance-related parameters. Qwen3.5 Megatron remains in BSHD, so
-# remove-padding and dynamic batching stay disabled.
+# Performance-related parameters for the Qwen3-4B TPR smoke example.
+# Keep dynamic batching disabled; Megatron Actor uses remove-padding.
 use_dynamic_bsz="${USE_DYNAMIC_BSZ:-False}"
 gen_tp="${ROLLOUT_TP:-${GEN_TP:-2}}"
 train_tp="${TRAIN_TP:-${TP:-2}}"
 train_pp="${TRAIN_PP:-${PP:-1}}"
-train_cp="${TRAIN_CP:-${CP:-8}}"
-rollout_max_num_seqs="${ROLLOUT_MAX_NUM_SEQS:-20}"
-rollout_gpu_memory_utilization="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.7}"
+train_cp="${TRAIN_CP:-${CP:-2}}"
+rollout_max_num_seqs="${ROLLOUT_MAX_NUM_SEQS:-4}"
+rollout_gpu_memory_utilization="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.60}"
 
 optimizer_offload_fraction="${OFFLOAD_FRACTION:-1.0}"
 actor_lr="${ACTOR_LR:-1e-6}"
@@ -85,22 +85,22 @@ USE_DIST_CKPT="${USE_DIST_CKPT:-False}"
 PARAM_OFFLOAD="${PARAM_OFFLOAD:-True}"
 OPTIMIZER_OFFLOAD="${OPTIMIZER_OFFLOAD:-True}"
 
-# V1 colocate_async topology.
-NNODES="${NNODES:-2}"
-NGPUS_PER_NODE="${NGPUS_PER_NODE:-16}"
+# V1 colocate_async example: 8 NPUs = TP2 * CP2 * DP2 (PP1, SP=True).
+NNODES="${NNODES:-1}"
+NGPUS_PER_NODE="${NGPUS_PER_NODE:-8}"
 
-train_prompt_bsz="${TRAIN_PROMPT_BSZ:-64}"
-n_resp_per_prompt="${N_RESP_PER_PROMPT:-8}"
-train_prompt_mini_bsz="${PPO_MINI_BATCH_SIZE:-16}"
+train_prompt_bsz="${TRAIN_PROMPT_BSZ:-2}"
+n_resp_per_prompt="${N_RESP_PER_PROMPT:-4}"
+train_prompt_mini_bsz="${PPO_MINI_BATCH_SIZE:-2}"
 ppo_micro_batch_size_per_gpu="${PPO_MICRO_BATCH_SIZE_PER_GPU:-1}"
 log_prob_micro_batch_size_per_gpu="${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU:-1}"
-num_warmup_batches="${NUM_WARMUP_BATCHES:-1}"
-filter_groups_enable="${FILTER_GROUPS_ENABLE:-True}"
+num_warmup_batches="${NUM_WARMUP_BATCHES:-0}"
+filter_groups_enable="${FILTER_GROUPS_ENABLE:-False}"
 
-total_epochs="${TOTAL_EPOCHS:-10}"
-total_training_steps="${TOTAL_TRAINING_STEPS:-200}"
-save_freq="${SAVE_FREQ:-10}"
-test_freq="${TEST_FREQ:-10}"
+total_epochs="${TOTAL_EPOCHS:-1}"
+total_training_steps="${TOTAL_TRAINING_STEPS:-1}"
+save_freq="${SAVE_FREQ:--1}"
+test_freq="${TEST_FREQ:--1}"
 
 actor_ppo_max_token_len=$((max_model_len / train_cp))
 infer_ppo_max_token_len=$((max_model_len / train_cp))
@@ -243,7 +243,6 @@ ray job submit --no-wait --runtime-env $RUNTIME_ENV \
     actor_rollout_ref.rollout.checkpoint_engine.backend=nccl \
     actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes=2048 \
     actor_rollout_ref.rollout.free_cache_engine=True \
-    +actor_rollout_ref.rollout.engine_kwargs.vllm.mamba_cache_mode=align \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.additional_config.enable_cpu_binding=true \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.async_scheduling=false \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz="${use_dynamic_bsz}" \
