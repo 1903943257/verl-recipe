@@ -239,10 +239,10 @@ ray job submit --no-wait --runtime-env $RUNTIME_ENV \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.name="${rollout_name}" \
     actor_rollout_ref.rollout.mode="${rollout_mode}" \
+    actor_rollout_ref.rollout.enforce_eager=True \
     actor_rollout_ref.rollout.checkpoint_engine.backend=nccl \
     actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes=2048 \
     actor_rollout_ref.rollout.free_cache_engine=True \
-    '+actor_rollout_ref.rollout.engine_kwargs.vllm.compilation_config.cudagraph_mode="FULL_DECODE_ONLY"' \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.mamba_cache_mode=align \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.additional_config.enable_cpu_binding=true \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.async_scheduling=false \
